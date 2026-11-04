@@ -1,0 +1,1088 @@
+diff --git a/marwane_modifs_tojmf.diff b/marwane_modifs_tojmf.diff
+new file mode 100644
+index 00000000..e69de29b
+diff --git a/mes_modifications.diff b/mes_modifications.diff
+new file mode 100644
+index 00000000..e69de29b
+diff --git a/modifs2.diff b/modifs2.diff
+new file mode 100644
+index 00000000..108bbc25
+--- /dev/null
++++ b/modifs2.diff
+@@ -0,0 +1,1076 @@
++diff --git a/examples/simple_repeater/MyMesh.cpp b/examples/simple_repeater/MyMesh.cpp
++index 09690749..1e82fd99 100644
++--- a/examples/simple_repeater/MyMesh.cpp
+++++ b/examples/simple_repeater/MyMesh.cpp
++@@ -214,6 +214,10 @@ uint8_t MyMesh::handleAnonClockReq(const mesh::Identity& sender, uint32_t sender
++ int MyMesh::handleRequest(ClientInfo *sender, uint32_t sender_timestamp, uint8_t *payload, size_t payload_len) {
++   // uint32_t now = getRTCClock()->getCurrentTimeUnique();
++   // memcpy(reply_data, &now, 4);   // response packets always prefixed with timestamp
+++char buf[245];
+++sprintf(buf,"JMF: handleRequest %x\r\n",payload[0]);
+++Serial.print(buf);
+++
++   memcpy(reply_data, &sender_timestamp, 4); // reflect sender_timestamp back in response packet (kind of like a 'tag')
++ 
++   if (payload[0] == REQ_TYPE_GET_STATUS) {  // guests can also access this now
++@@ -399,7 +403,7 @@ File MyMesh::openAppend(const char *fname) {
++ static uint8_t max_loop_minimal[] =  { 0, /* 1-byte */  4, /* 2-byte */  2, /* 3-byte */  1 };
++ static uint8_t max_loop_moderate[] = { 0, /* 1-byte */  2, /* 2-byte */  1, /* 3-byte */  1 };
++ static uint8_t max_loop_strict[] =   { 0, /* 1-byte */  1, /* 2-byte */  1, /* 3-byte */  1 };
++-
+++//Marwane ici le repeteur passe le nouveau packet à cette fonction, il regarde la trace laissée dans le packet. s'il voit qu'il a deja relayé ce packet il y a quelque millusecondes, il le jette sinon il le relaie.
++ bool MyMesh::isLooped(const mesh::Packet* packet, const uint8_t max_counters[]) {
++   uint8_t hash_size = packet->getPathHashSize();
++   uint8_t hash_count = packet->getPathHashCount();
++@@ -427,6 +431,8 @@ void MyMesh::sendFloodReply(mesh::Packet* packet, unsigned long delay_millis, ui
++ }
++ 
++ bool MyMesh::allowPacketForward(const mesh::Packet *packet) {
+++Serial.print("JMF allow packet fwd\r\n"); 
+++return true; // JMF
++   if (_prefs.disable_fwd) return false;
++   if (packet->isRouteFlood()) {
++     if (packet->getPathHashCount() >= _prefs.flood_max) return false;
++@@ -464,6 +470,12 @@ const char *MyMesh::getLogDateTime() {
++ }
++ 
++ void MyMesh::logRxRaw(float snr, float rssi, const uint8_t raw[], int len) {
+++  // --- MARWANE AJOUT : Affichage forcé en RAW pour le debug ---
+++  Serial.print("\r\n[RAW RX] ");
+++  mesh::Utils::printHex(Serial, raw, len); // Affiche les octets en Hexadécimal
+++  Serial.print("\r\n");
+++  // ---------------------MARWANE 30/06---------------------------------------
+++
++ #if MESH_PACKET_LOGGING
++   Serial.print(getLogDateTime());
++   Serial.print(" RAW: ");
++@@ -478,7 +490,13 @@ void MyMesh::logRx(mesh::Packet *pkt, int len, float score) {
++     bridge.sendPacket(pkt);
++   }
++ #endif
++-
+++// --- MARWANE AJOUT : logRx avec détection du type de routage ---
+++  Serial.printf("\r\n>>> [REPEATER] Paquet intercepté ! Type: %d | Route: %s | RSSI: %d | Hops: %d <<<\r\n", 
+++                pkt->getPayloadType(), 
+++                pkt->isRouteDirect() ? "DIRECT" : "FLOOD",
+++                (int)_radio->getLastRSSI(), 
+++                pkt->getPathHashCount());
+++// ---------------------------------------------------------------
++   if (_logging) {
++     File f = openAppend(PACKET_LOG_FILE);
++     if (f) {
++@@ -499,12 +517,29 @@ void MyMesh::logRx(mesh::Packet *pkt, int len, float score) {
++ }
++ 
++ void MyMesh::logTx(mesh::Packet *pkt, int len) {
+++  uint8_t raw[256];
+++  int n = pkt->writeTo(raw);   // trame exacte envoyée : en-tête + chemin + données
+++
+++  Serial.printf("\r\n<<< [REPEATER] Paquet relayé (TX) ! Type: %d | Route: %s | Hops: %d <<<\r\n",
+++                pkt->getPayloadType(),
+++                pkt->isRouteDirect() ? "DIRECT" : "FLOOD",
+++                pkt->getPathHashCount());
+++  Serial.print("[RAW TX] ");
+++  mesh::Utils::printHex(Serial, raw, n);
+++  Serial.print("\r\n");
+++// ---------------------------------------------------------------
+++
++ #ifdef WITH_BRIDGE
++   if (_prefs.bridge_pkt_src == 0) {
++     bridge.sendPacket(pkt);
++   }
++ #endif
++-
+++// --- Marwane Ajout ---
+++       Serial.printf("\r\n>>> [REPEATER] Paquet recu ! Type: %d | RSSI: %d | Hops: %d <<<\r\n", 
+++                pkt->getPayloadType(), 
+++                (int)_radio->getLastRSSI(), 
+++                pkt->getPathHashCount());
+++//------------------------------------------
++   if (_logging) {
++     File f = openAppend(PACKET_LOG_FILE);
++     if (f) {
++@@ -568,6 +603,7 @@ bool MyMesh::filterRecvFloodPacket(mesh::Packet* pkt) {
++ 
++ void MyMesh::onAnonDataRecv(mesh::Packet *packet, const uint8_t *secret, const mesh::Identity &sender,
++                             uint8_t *data, size_t len) {
+++Serial.print("JMF anon data recv\r\n");
++   if (packet->getPayloadType() == PAYLOAD_TYPE_ANON_REQ) { // received an initial request by a possible admin
++                                                            // client (unknown at this stage)
++     uint32_t timestamp;
++@@ -588,9 +624,9 @@ void MyMesh::onAnonDataRecv(mesh::Packet *packet, const uint8_t *secret, const m
++     } else {
++       reply_len = 0;  // unknown/invalid request type
++     }
++-
+++//irec
++     if (reply_len == 0) return;   // invalid request
++-
+++//Marwane Message direct maintenant
++     if (packet->isRouteFlood()) {
++       // let this sender know path TO here, so they can use sendDirect(), and ALSO encode the response
++       mesh::Packet* path = createPathReturn(sender, secret, packet->path, packet->path_len,
++@@ -638,10 +674,11 @@ void MyMesh::onAdvertRecv(mesh::Packet *packet, const mesh::Identity &id, uint32
++                           const uint8_t *app_data, size_t app_data_len) {
++   mesh::Mesh::onAdvertRecv(packet, id, timestamp, app_data, app_data_len); // chain to super impl
++ 
++-  // if this a zero hop advert (and not via 'Share'), add it to neighbours
+++  // if this a zero hop advert (and not via 'Share'), add it to neighbours ------Marwane---
++   if (packet->getPathHashCount() == 0 && !isShare(packet)) {
++     AdvertDataParser parser(app_data, app_data_len);
++-    if (parser.isValid() && parser.getType() == ADV_TYPE_REPEATER) { // just keep neigbouring Repeaters
+++    // --- MARWANE AJOUT : On accepte les Repeaters ET les Sensors JE CROIS QUE LE REPEATER EST UN PEU RACISTE ET RETOURNE QUE LES AUTRES REPEATER---
+++    if (parser.isValid() && (parser.getType() == ADV_TYPE_REPEATER || parser.getType() == ADV_TYPE_SENSOR)) { 
++       putNeighbour(id, timestamp, packet->getSNR());
++     }
++   }
++@@ -655,6 +692,7 @@ void MyMesh::onPeerDataRecv(mesh::Packet *packet, uint8_t type, int sender_idx,
++     return;
++   }
++   ClientInfo* client = acl.getClientByIdx(i);
+++Serial.print("JMF peer data recv\r\n");
++ 
++   if (type == PAYLOAD_TYPE_REQ) { // request (from a Known admin client!)
++     uint32_t timestamp;
++@@ -753,6 +791,7 @@ void MyMesh::onPeerDataRecv(mesh::Packet *packet, uint8_t type, int sender_idx,
++ bool MyMesh::onPeerPathRecv(mesh::Packet *packet, int sender_idx, const uint8_t *secret, uint8_t *path,
++                             uint8_t path_len, uint8_t extra_type, uint8_t *extra, uint8_t extra_len) {
++   // TODO: prevent replay attacks
+++Serial.print("JMF peer path recv\r\n");
++   int i = matching_peer_indexes[sender_idx];
++ 
++   if (i >= 0 && i < acl.getNumClients()) { // get from our known_clients table (sender SHOULD already be known in this context)
++@@ -775,6 +814,7 @@ bool MyMesh::onPeerPathRecv(mesh::Packet *packet, int sender_idx, const uint8_t
++ 
++ void MyMesh::onControlDataRecv(mesh::Packet* packet) {
++   uint8_t type = packet->payload[0] & 0xF0;    // just test upper 4 bits
+++Serial.print("JMF ctrl data recv\r\n");
++   if (type == CTL_TYPE_NODE_DISCOVER_REQ && packet->payload_len >= 6
++       && !_prefs.disable_fwd && discover_limiter.allow(rtc_clock.getCurrentTime())
++   ) {
++@@ -803,7 +843,8 @@ void MyMesh::onControlDataRecv(mesh::Packet* packet) {
++     }
++   } else if (type == CTL_TYPE_NODE_DISCOVER_RESP && packet->payload_len >= 6) {
++     uint8_t node_type = packet->payload[0] & 0x0F;
++-    if (node_type != ADV_TYPE_REPEATER) {
+++    //Marwane
+++    if (node_type != ADV_TYPE_REPEATER && node_type != ADV_TYPE_SENSOR) {
++       return;
++     }
++     if (packet->payload_len < 6 + PUB_KEY_SIZE) {
++@@ -830,9 +871,12 @@ void MyMesh::onControlDataRecv(mesh::Packet* packet) {
++ }
++ 
++ void MyMesh::sendNodeDiscoverReq() {
+++Serial.print("JMF sendNodeDiscovery\r\n");
++   uint8_t data[10];
++   data[0] = CTL_TYPE_NODE_DISCOVER_REQ; // prefix_only=0
++-  data[1] = (1 << ADV_TYPE_REPEATER);
+++  //--------MARWANE---------
+++  data[1] = (1 << ADV_TYPE_REPEATER) | (1 << ADV_TYPE_SENSOR);
+++  //------------------------
++   getRNG()->random(&data[2], 4); // tag
++   memcpy(&pending_discover_tag, &data[2], 4);
++   pending_discover_until = futureMillis(60000);
++@@ -1032,6 +1076,7 @@ void MyMesh::updateAdvertTimer() {
++ }
++ 
++ void MyMesh::updateFloodAdvertTimer() {
+++Serial.print("JMF flood advert\r\n");
++   if (_prefs.flood_advert_interval > 0) { // schedule flood advert timer
++     next_flood_advert = futureMillis(((uint32_t)_prefs.flood_advert_interval) * 60 * 60 * 1000);
++   } else {
++@@ -1263,6 +1308,23 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply
++ }
++ 
++ void MyMesh::loop() {
+++// --- AJOUT : AFFICHAGE AUTOMATIQUE DES VOISINS Marwane a été ici---
+++  static unsigned long next_auto_dump = 0;
+++  if (next_auto_dump == 0 || millisHasNowPassed(next_auto_dump)) {
+++    char reply[512] = {0};
+++    formatNeighborsReply(reply);
+++    
+++    // On n'affiche que s'il y a au moins un voisin trouvé
+++    if (strlen(reply) > 0) {
+++      Serial.printf("\n[AUTO-DISCOVERY] Voisins actuels : %s\n", reply);
+++    } else {
+++      Serial.println("\n[AUTO-DISCOVERY] Aucun voisin détecté pour le moment...");
+++    }
+++    
+++    // Programme le prochain affichage dans 30 secondes (30000 ms)
+++    next_auto_dump = futureMillis(30000); 
+++  }
+++  // -------------------------------------------------
++ #ifdef WITH_BRIDGE
++   bridge.loop();
++ #endif
++diff --git a/examples/simple_room_server/MyMesh.cpp b/examples/simple_room_server/MyMesh.cpp
++index 98b22fdb..68824372 100644
++--- a/examples/simple_room_server/MyMesh.cpp
+++++ b/examples/simple_room_server/MyMesh.cpp
++@@ -120,17 +120,19 @@ mesh::Packet *MyMesh::createSelfAdvert() {
++ 
++   return createAdvert(self_id, app_data, app_data_len);
++ }
++-
+++/*
++ File MyMesh::openAppend(const char *fname) {
++ #if defined(NRF52_PLATFORM)
++   return _fs->open(fname, FILE_O_WRITE);
+++#elif defined(ARDUINO_ARCH_STM32)
+++  return _fs->open(fname, Adafruit_LittleFS_Namespace::FILE_O_WRITE);  // <--- AJOUT POUR WIO-E5
++ #elif defined(RP2040_PLATFORM)
++   return _fs->open(fname, "a");
++ #else
++   return _fs->open(fname, "a", true);
++ #endif
++ }
++-
+++*/
++ int MyMesh::handleRequest(ClientInfo *sender, uint32_t sender_timestamp, uint8_t *payload,
++                           size_t payload_len) {
++   // uint32_t now = getRTCClock()->getCurrentTimeUnique();
++@@ -209,6 +211,11 @@ void MyMesh::logRxRaw(float snr, float rssi, const uint8_t raw[], int len) {
++ }
++ 
++ void MyMesh::logRx(mesh::Packet *pkt, int len, float score) {
+++Serial.printf("\n>>> [ROOM SERVER] Paquet intercepté ! Type: %d | Route: %s | Taille: %d <<<\n", 
+++                pkt->getPayloadType(), 
+++                pkt->isRouteDirect() ? "Direct" : "Flood", 
+++                pkt->payload_len);
+++                /*
++   if (_logging) {
++     File f = openAppend(PACKET_LOG_FILE);
++     if (f) {
++@@ -225,9 +232,9 @@ void MyMesh::logRx(mesh::Packet *pkt, int len, float score) {
++       }
++       f.close();
++     }
++-  }
+++  }*/
++ }
++-void MyMesh::logTx(mesh::Packet *pkt, int len) {
+++void MyMesh::logTx(mesh::Packet *pkt, int len) {/*
++   if (_logging) {
++     File f = openAppend(PACKET_LOG_FILE);
++     if (f) {
++@@ -243,9 +250,9 @@ void MyMesh::logTx(mesh::Packet *pkt, int len) {
++       }
++       f.close();
++     }
++-  }
+++  }*/
++ }
++-void MyMesh::logTxFail(mesh::Packet *pkt, int len) {
+++void MyMesh::logTxFail(mesh::Packet *pkt, int len) {/*
++   if (_logging) {
++     File f = openAppend(PACKET_LOG_FILE);
++     if (f) {
++@@ -254,7 +261,7 @@ void MyMesh::logTxFail(mesh::Packet *pkt, int len) {
++                pkt->isRouteDirect() ? "D" : "F", pkt->payload_len);
++       f.close();
++     }
++-  }
+++  }*/
++ }
++ 
++ int MyMesh::calcRxDelay(float score, uint32_t air_time) const {
++@@ -671,11 +678,28 @@ MyMesh::MyMesh(mesh::MainBoard &board, mesh::Radio &radio, mesh::MillisecondCloc
++ void MyMesh::begin(FILESYSTEM *fs) {
++   mesh::Mesh::begin();
++   _fs = fs;
++-  // load persisted prefs
++-  _cli.loadPrefs(_fs);
++ 
++-  acl.load(_fs, self_id);
++-  region_map.load(_fs);
+++  // ---> LE PATCH ANTI-CRASH <---
+++  if (_fs != NULL) {
+++    // load persisted prefs
+++    _cli.loadPrefs(_fs);
+++
+++    acl.load(_fs, self_id);
+++    for (int i = 0; i < acl.getNumClients(); i++) {
+++      acl.getClientByIdx(i)->out_path_len = OUT_PATH_UNKNOWN; 
+++    }
+++    region_map.load(_fs);
+++  } else {
+++    // ---> LE NOUVEAU PATCH RADIO (Pour la tourbière) <---
+++    // Comme on n'a pas de mémoire, on force les paramètres LoRa par défaut
+++    _prefs.freq = 868.1;       // Fréquence Europe
+++    _prefs.bw = 125.0;         // Bande passante classique
+++    _prefs.sf = 9;             // Spreading Factor robuste
+++    _prefs.cr = 5;             // Coding Rate (4/5)
+++    _prefs.tx_power_dbm = 14;  // Puissance d'émission standard
+++    _prefs.adc_multiplier = 1.0;
+++    // -----------------------------------------------------
+++  }
++ 
++   // establish default-scope
++   {
++@@ -686,8 +710,8 @@ void MyMesh::begin(FILESYSTEM *fs) {
++ #ifdef DEFAULT_FLOOD_SCOPE_NAME
++       r = region_map.findByName(DEFAULT_FLOOD_SCOPE_NAME);
++       if (r == NULL) {
++-        r = region_map.putRegion(DEFAULT_FLOOD_SCOPE_NAME, 0);  // auto-create the default scope region
++-        if (r) { r->flags = 0; }   // Allow-flood
+++        r = region_map.putRegion(DEFAULT_FLOOD_SCOPE_NAME, 0);  
+++        if (r) { r->flags = 0; }   
++       }
++       if (r) {
++         region_map.setDefaultRegion(r);
++@@ -697,6 +721,7 @@ void MyMesh::begin(FILESYSTEM *fs) {
++     }
++   }
++ 
+++  // C'est ici que la radio s'allume avec nos paramètres !
++   radio_driver.setParams(_prefs.freq, _prefs.bw, _prefs.sf, _prefs.cr);
++   radio_driver.setTxPower(_prefs.tx_power_dbm);
++ 
++@@ -709,7 +734,6 @@ void MyMesh::begin(FILESYSTEM *fs) {
++   applyGpsPrefs();
++ #endif
++ }
++-
++ void MyMesh::sendFloodScoped(const TransportKey& scope, mesh::Packet* pkt, uint32_t delay_millis, uint8_t path_hash_size) {
++   if (scope.isNull()) {
++     sendFlood(pkt, delay_millis, path_hash_size);
++@@ -745,8 +769,10 @@ void MyMesh::applyTempRadioParams(float freq, float bw, uint8_t sf, uint8_t cr,
++ }
++ 
++ bool MyMesh::formatFileSystem() {
++-#if defined(NRF52_PLATFORM)
+++/*#if defined(NRF52_PLATFORM)
++   return InternalFS.format();
+++#elif defined(ARDUINO_ARCH_STM32)
+++  return InternalFS.format();               // <--- AJOUT POUR WIO-E5
++ #elif defined(RP2040_PLATFORM)
++   return LittleFS.format();
++ #elif defined(ESP32)
++@@ -754,9 +780,9 @@ bool MyMesh::formatFileSystem() {
++ #else
++ #error "need to implement file system erase"
++   return false;
++-#endif
+++#endif */
+++return true;  // On simule un succès
++ }
++-
++ void MyMesh::sendSelfAdvertisement(int delay_millis, bool flood) {
++   mesh::Packet *pkt = createSelfAdvert();
++   if (pkt) {
++@@ -786,7 +812,7 @@ void MyMesh::updateFloodAdvertTimer() {
++ }
++ 
++ void MyMesh::dumpLogFile() {
++-#if defined(RP2040_PLATFORM)
+++/*#if defined(RP2040_PLATFORM)
++   File f = _fs->open(PACKET_LOG_FILE, "r");
++ #else
++   File f = _fs->open(PACKET_LOG_FILE);
++@@ -799,6 +825,7 @@ void MyMesh::dumpLogFile() {
++     }
++     f.close();
++   }
+++  */
++ }
++ 
++ void MyMesh::setTxPower(int8_t power_dbm) {
++diff --git a/examples/simple_room_server/MyMesh.h b/examples/simple_room_server/MyMesh.h
++index 5277ddad..6c62b221 100644
++--- a/examples/simple_room_server/MyMesh.h
+++++ b/examples/simple_room_server/MyMesh.h
++@@ -1,15 +1,27 @@
++ #pragma once
++ 
++ #include <Arduino.h>   // needed for PlatformIO
+++
+++// --- 1. LE PATCH STM32 (Tuer la macro AVANT de charger le Mesh) ---
+++#if defined(ARDUINO_ARCH_STM32)
+++  #include <stm32wlxx.h>
+++  #undef RNG
+++#endif
+++// ------------------------------------------------------------------
+++
++ #include <Mesh.h>
++ 
+++// --- 2. LE PATCH MEMOIRE (Adafruit_LittleFS pour le Wio-E5) ---
++ #if defined(NRF52_PLATFORM)
++   #include <InternalFileSystem.h>
+++#elif defined(ARDUINO_ARCH_STM32)
+++  #include <Adafruit_LittleFS.h>    // <-- La bonne librairie pour ta carte !
++ #elif defined(RP2040_PLATFORM)
++   #include <LittleFS.h>
++ #elif defined(ESP32)
++   #include <SPIFFS.h>
++ #endif
+++// --------------------------------------------------------------
++ 
++ #include <helpers/ArduinoHelpers.h>
++ #include <helpers/StaticPoolPacketManager.h>
++diff --git a/examples/simple_room_server/main.cpp b/examples/simple_room_server/main.cpp
++index a3798b21..a5f04099 100644
++--- a/examples/simple_room_server/main.cpp
+++++ b/examples/simple_room_server/main.cpp
++@@ -33,45 +33,31 @@ void setup() {
++   }
++ #endif
++ 
++-  if (!radio_init()) { halt(); }
++-
++-  fast_rng.begin(radio_driver.getRngSeed());
++-
++-  FILESYSTEM* fs;
++-#if defined(NRF52_PLATFORM)
++-  InternalFS.begin();
++-  fs = &InternalFS;
++-  IdentityStore store(InternalFS, "");
++-#elif defined(RP2040_PLATFORM)
++-  LittleFS.begin();
++-  fs = &LittleFS;
++-  IdentityStore store(LittleFS, "/identity");
++-  store.begin();
++-#elif defined(ESP32)
++-  SPIFFS.begin(true);
++-  fs = &SPIFFS;
++-  IdentityStore store(SPIFFS, "/identity");
++-#else
++-  #error "need to define filesystem"
++-#endif
++-  if (!store.load("_main", the_mesh.self_id)) {
++-    the_mesh.self_id = radio_new_identity();   // create new random identity
++-    int count = 0;
++-    while (count < 10 && (the_mesh.self_id.pub_key[0] == 0x00 || the_mesh.self_id.pub_key[0] == 0xFF)) {  // reserved id hashes
++-      the_mesh.self_id = radio_new_identity(); count++;
++-    }
++-    store.save("_main", the_mesh.self_id);
+++// --- VERSION SIMPLIFIÉE (SANS FICHIERS) ---
+++  Serial.println("Initialisation du Room Server (Sans mémoire Flash)");
+++
+++  // On génère une identité aléatoire en RAM, elle sera perdue au redémarrage
+++  the_mesh.self_id = radio_new_identity();
+++  int count = 0;
+++  while (count < 10 && (the_mesh.self_id.pub_key[0] == 0x00 || the_mesh.self_id.pub_key[0] == 0xFF)) {
+++    the_mesh.self_id = radio_new_identity(); 
+++    count++;
++   }
++ 
++-  Serial.print("Room ID: ");
++-  mesh::Utils::printHex(Serial, the_mesh.self_id.pub_key, PUB_KEY_SIZE); Serial.println();
+++  Serial.print("Room ID (Temporaire): ");
+++  mesh::Utils::printHex(Serial, the_mesh.self_id.pub_key, PUB_KEY_SIZE); 
+++  Serial.println();
++ 
++   command[0] = 0;
++-
++   sensors.begin();
++ 
++-  the_mesh.begin(fs);
++-
+++  // On passe NULL car on n'a pas de système de fichiers
+++  the_mesh.begin(NULL); 
+++  // ------------------------------------------
+++  
+++  
+++  
+++  
++ #ifdef DISPLAY_CLASS
++   ui_task.begin(the_mesh.getNodePrefs(), FIRMWARE_BUILD_DATE, FIRMWARE_VERSION);
++ #endif
++diff --git a/examples/simple_sensor/SensorMesh.cpp b/examples/simple_sensor/SensorMesh.cpp
++index 879fcbf0..fda0a8fc 100644
++--- a/examples/simple_sensor/SensorMesh.cpp
+++++ b/examples/simple_sensor/SensorMesh.cpp
++@@ -15,7 +15,7 @@
++   #define LORA_CR      5
++ #endif
++ #ifndef LORA_TX_POWER
++-  #define LORA_TX_POWER  20
+++  #define LORA_TX_POWER  -20
++ #endif
++ 
++ #ifndef ADVERT_NAME
++@@ -240,6 +240,7 @@ uint8_t SensorMesh::handleRequest(uint8_t perms, uint32_t sender_timestamp, uint
++ mesh::Packet* SensorMesh::createSelfAdvert() {
++   uint8_t app_data[MAX_ADVERT_DATA_SIZE];
++   uint8_t app_data_len = _cli.buildAdvertData(ADV_TYPE_SENSOR, app_data);
+++  Serial.print("JMF createSelfAdvert\r\n");
++ 
++   return createAdvert(self_id, app_data, app_data_len);
++ }
++@@ -257,18 +258,34 @@ void SensorMesh::sendAlert(const ClientInfo* c, Trigger* t) {
++   t->attempt++;
++ 
++   auto pkt = createDatagram(PAYLOAD_TYPE_TXT_MSG, c->id, c->shared_secret, data, 5 + text_len);
++-  if (pkt) {
+++  if (pkt) { // Si je connais le chemin je pars directement, sinn je crie (Flood)
++     if (c->out_path_len != OUT_PATH_UNKNOWN) {  // we have an out_path, so send DIRECT
++       sendDirect(pkt, c->out_path, c->out_path_len);
+++      Serial.print("\tSI je connais le chemin\t");
++     } else {
++       unsigned long delay_millis = 0;
++       sendFlood(pkt, delay_millis, _prefs.path_hash_mode + 1);
+++      Serial.print("\tNON j'ai me trompé\t");
++     }
++   }
++   t->send_expiry = futureMillis(ALERT_ACK_EXPIRY_MILLIS);
++ }
++ 
++ void SensorMesh::alertIf(bool condition, Trigger& t, AlertPriority pri, const char* text) {
+++  if (text[0]=='P') // JMF force periodic
+++    {
+++      StrHelper::strncpy(t.text, text, sizeof(t.text));
+++      t.pri = pri;
+++      t.send_expiry = 0;  // signal that initial send is needed
+++      t.attempt = 3;      // JMF was 4
+++      t.curr_contact_idx = -1;  // start iterating thru contacts[]
+++
+++      alert_tasks[num_alert_tasks++] = &t;  // add to queue
+++
+++      Serial.print(getRTCClock()->getCurrentTime());
+++      Serial.print(num_alert_tasks);
+++      Serial.print("\tJMF alert create\t");
+++    }
++   if (condition) {
++     if (!t.isTriggered() && num_alert_tasks < MAX_CONCURRENT_ALERTS) {
++       StrHelper::strncpy(t.text, text, sizeof(t.text));
++@@ -295,6 +312,8 @@ void SensorMesh::alertIf(bool condition, Trigger& t, AlertPriority pri, const ch
++       }
++     }
++   }
+++  Serial.print(num_alert_tasks);
+++  Serial.print("\r\n");
++ }
++ 
++ float SensorMesh::getAirtimeBudgetFactor() const {
++@@ -360,10 +379,13 @@ uint8_t SensorMesh::handleLoginReq(const mesh::Identity& sender, const uint8_t*
++     dirty_contacts_expiry = futureMillis(LAZY_CONTACTS_WRITE_DELAY);
++   }
++ 
++-  if (is_flood) {
++-    client->out_path_len = OUT_PATH_UNKNOWN;  // need to rediscover out_path
+++  //if (is_flood) {
+++    //client->out_path_len = OUT_PATH_UNKNOWN;  // need to rediscover out_path
+++  //}
+++//Marwane a été la, je force le sensor pour qu'il oublie le trajet direct 
+++  for (int i = 0; i < acl.getNumClients(); i++) {
+++    acl.getClientByIdx(i)->out_path_len = OUT_PATH_UNKNOWN; 
++   }
++-
++   uint32_t now = getRTCClock()->getCurrentTimeUnique();
++   memcpy(reply_data, &now, 4);   // response packets always prefixed with timestamp
++   reply_data[4] = RESP_SERVER_LOGIN_OK;
++@@ -959,6 +981,7 @@ void SensorMesh::loop() {
++       } else if (t->curr_contact_idx < acl.getNumClients()) {
++         auto c = acl.getClientByIdx(t->curr_contact_idx);   // send next attempt
++         sendAlert(c, t);  // NOTE: modifies attempt, expected_acks[] and send_expiry
+++        Serial.print("JMF sendAlert\r\n");
++       } else {
++         // contact list has likely been modified while waiting for alert ACK, cancel this task
++         t->attempt = 4;   // next ::loop() will remove t from queue
++diff --git a/examples/simple_sensor/SensorMesh.h b/examples/simple_sensor/SensorMesh.h
++index c9f135f6..6fb7dea3 100644
++--- a/examples/simple_sensor/SensorMesh.h
+++++ b/examples/simple_sensor/SensorMesh.h
++@@ -130,6 +130,7 @@ protected:
++   void onAckRecv(mesh::Packet* packet, uint32_t ack_crc) override;
++   virtual bool handleIncomingMsg(ClientInfo& from, uint32_t timestamp, uint8_t* data, uint8_t flags, size_t len);
++   void sendAckTo(const ClientInfo& dest, uint32_t ack_hash, uint8_t path_hash_size=1);
+++  uint32_t last_read_timeJMF, currJMF;
++ private:
++   FILESYSTEM* _fs;
++   unsigned long next_local_advert, next_flood_advert;
++diff --git a/examples/simple_sensor/main.cpp b/examples/simple_sensor/main.cpp
++index cace67a0..9586f2b2 100644
++--- a/examples/simple_sensor/main.cpp
+++++ b/examples/simple_sensor/main.cpp
++@@ -5,6 +5,10 @@
++   static UITask ui_task(display);
++ #endif
++ 
+++#ifndef SENSOR_READ_INTERVAL_SECS
+++#define SENSOR_READ_INTERVAL_SECS  60
+++#endif
+++
++ class MyMesh : public SensorMesh {
++ public:
++   MyMesh(mesh::MainBoard& board, mesh::Radio& radio, mesh::MillisecondClock& ms, mesh::RNG& rng, mesh::RTCClock& rtc, mesh::MeshTables& tables)
++@@ -15,7 +19,7 @@ public:
++ 
++ protected:
++   /* ========================== custom logic here ========================== */
++-  Trigger low_batt, critical_batt;
+++  Trigger low_batt, critical_batt, periodic;
++   TimeSeriesData  battery_data;
++ 
++   void onSensorDataRead() override {
++@@ -24,6 +28,7 @@ protected:
++     battery_data.recordData(getRTCClock(), batt_voltage);   // record battery
++     alertIf(batt_voltage < 3.4f, critical_batt, HIGH_PRI_ALERT, "Battery is critical!");
++     alertIf(batt_voltage < 3.6f, low_batt, LOW_PRI_ALERT, "Battery is low");
+++    alertIf(getRTCClock()->getCurrentTime() - last_read_timeJMF >= SENSOR_READ_INTERVAL_SECS, periodic, LOW_PRI_ALERT, "Periodic JMF");
++   }
++ 
++   int querySeriesData(uint32_t start_secs_ago, uint32_t end_secs_ago, MinMaxAvg dest[], int max_num) override {
++@@ -34,7 +39,22 @@ protected:
++   bool handleCustomCommand(uint32_t sender_timestamp, char* command, char* reply) override {
++     if (strcmp(command, "magic") == 0) {    // example 'custom' command handling
++       strcpy(reply, "**Magic now done**");
++-      return true;   // handled
+++      return true; // handled
+++    } else if (strcmp(command, "temp") == 0) {
+++      CayenneLPP telem(25);
+++      sensors.querySensors(TELEM_PERM_ENVIRONMENT, telem);
+++      uint8_t *buf = telem.getBuffer();
+++
+++      while (*buf != LPP_TEMPERATURE) {
+++        buf++;
+++      }
+++      buf++;
+++
+++      int16_t temperature = (*buf << 8) | *(buf + 1);
+++
+++      sprintf(reply, "measured temperature : %d.%d °C", temperature / 10, temperature % 10);
+++      // strcpy(reply, "measured temperature: ");
+++      return true; // handled
++     }
++     return false;  // not handled
++   }
++@@ -52,6 +72,8 @@ void halt() {
++ 
++ static char command[160];
++ 
+++static uint32_t send_temperature_timer = 0;
+++
++ void setup() {
++   Serial.begin(115200);
++   delay(1000);
++@@ -73,6 +95,7 @@ void setup() {
++   FILESYSTEM* fs;
++ #if defined(NRF52_PLATFORM) || defined(STM32_PLATFORM)
++   InternalFS.begin();
+++  InternalFS.format();    // <--- L'ÉLECTROCHOC EST ICI
++   fs = &InternalFS;
++   IdentityStore store(InternalFS, "");
++ #elif defined(ESP32)
++@@ -110,10 +133,13 @@ void setup() {
++   ui_task.begin(the_mesh.getNodePrefs(), FIRMWARE_BUILD_DATE, FIRMWARE_VERSION);
++ #endif
++ 
++-  // send out initial zero hop Advertisement to the mesh
+++  // send out initial zero hop Advertisement to the mesh//Marwane
++ #if ENABLE_ADVERT_ON_BOOT == 1
++-  the_mesh.sendSelfAdvertisement(16000, false);
+++  the_mesh.sendSelfAdvertisement(16000, true);
++ #endif
+++
+++  // setup next time to send temperature
+++  send_temperature_timer = the_mesh.futureMillis(30000);
++ }
++ 
++ void loop() {
++@@ -135,10 +161,40 @@ void loop() {
++     char reply[160];
++     the_mesh.handleCommand(0, command, reply);  // NOTE: there is no sender_timestamp via serial!
++     if (reply[0]) {
++-      Serial.print("  -> "); Serial.println(reply);
+++      Serial.print("  -> ");
+++      Serial.println(reply);
++     }
++ 
++-    command[0] = 0;  // reset command buffer
+++    command[0] = 0; // reset command buffer
+++  }
+++
+++  // Test Code to send periodically temperature to neighbours
+++  if (send_temperature_timer && the_mesh.millisHasNowPassed(send_temperature_timer)) {
+++
+++    CayenneLPP telem(25);
+++    sensors.querySensors(TELEM_PERM_ENVIRONMENT, telem);
+++    uint8_t *buf = telem.getBuffer();
+++
+++    while (*buf != LPP_TEMPERATURE) {
+++      buf++;
+++    }
+++    buf++;
+++
+++    int16_t temperature = (*buf << 8) | *(buf + 1);
+++
+++//    uint8_t raw_data[] = {*buf, *(buf+1)};
+++//    uint8_t companion_path[] = {0xd9};
+++//    uint8_t companion_path_len = 1;
+++    uint8_t raw_data[10]={0,1,2,3,4,5,6,7,8,9};
+++    // mesh::Packet* packet = the_mesh.createRawData(raw_data, 10);
+++
+++/// JMF
+++    mesh::Packet *packet = the_mesh.createControlData(raw_data, 10);
+++    Serial.println("Temperature sent");
+++      the_mesh.sendFlood(packet); // ,0,1); // path hash size = 1 byte ; current path hash count = 0
+++//    the_mesh.sendDirect(packet,companion_path,companion_path_len);
+++
+++    send_temperature_timer = the_mesh.futureMillis(30000); // next temperature send in 30 sec
++   }
++ 
++   the_mesh.loop();
++diff --git a/platformio.ini b/platformio.ini
++index e16f7b83..4487be76 100644
++--- a/platformio.ini
+++++ b/platformio.ini
++@@ -25,9 +25,9 @@ lib_deps =
++   melopero/Melopero RV3028 @ ^1.1.0
++   electroniccats/CayenneLPP @ 1.6.1
++ build_flags = -w -DNDEBUG -DRADIOLIB_STATIC_ONLY=1 -DRADIOLIB_GODMODE=1
++-  -D LORA_FREQ=869.618
++-  -D LORA_BW=62.5
++-  -D LORA_SF=8
+++  -D LORA_FREQ=868.1
+++  -D LORA_BW=125
+++  -D LORA_SF=7
++   -D ENABLE_ADVERT_ON_BOOT=1
++   -D ENABLE_PRIVATE_KEY_IMPORT=1   ; NOTE: comment these out for more secure firmware
++   -D ENABLE_PRIVATE_KEY_EXPORT=1
++@@ -166,3 +166,14 @@ build_src_filter =
++   +<../src/Utils.cpp>
++ lib_deps =
++   google/googletest @ 1.17.0
+++; ----------------- MARWANE CUSTOM ENVS ---------------------
+++
+++[env:wio-e5-mini_room_server]
+++extends = stm32_base
+++board = lora_e5_mini
+++build_src_filter = ${stm32_base.build_src_filter} +<../examples/simple_room_server>
+++build_flags = 
+++  ${stm32_base.build_flags}
+++  -D LORA_TX_POWER=-9
+++  -I variants/wio-e5-mini
+++  -U RNG
++diff --git a/src/Mesh.cpp b/src/Mesh.cpp
++index 87ad61af..5e02e823 100644
++--- a/src/Mesh.cpp
+++++ b/src/Mesh.cpp
++@@ -55,7 +55,8 @@ DispatcherAction Mesh::onRecvPacket(Packet* pkt) {
++       uint16_t offset = (uint16_t)pkt->path_len << path_sz;
++       if (offset >= len) {   // TRACE has reached end of given path
++         onTraceRecv(pkt, trace_tag, auth_code, flags, pkt->path, &pkt->payload[i], len);
++-      } else if (self_id.isHashMatch(&pkt->payload[i + offset], 1 << path_sz) && allowPacketForward(pkt) && !_tables->hasSeen(pkt)) {
+++      } else if (self_id.isHashMatch(&pkt->payload[i + offset], 1 << path_sz) && allowPacketForward(pkt) && !_tables->wasSeen(pkt)) {
+++        _tables->markSeen(pkt);
++         // append SNR (Not hash!)
++         pkt->path[pkt->path_len++] = (int8_t) (pkt->getSNR()*4);
++ 
++@@ -86,20 +87,22 @@ DispatcherAction Mesh::onRecvPacket(Packet* pkt) {
++     }
++ 
++     if (self_id.isHashMatch(pkt->path, pkt->getPathHashSize()) && allowPacketForward(pkt)) {
+++      uint32_t d = getDirectRetransmitDelay(pkt);
++       if (pkt->getPayloadType() == PAYLOAD_TYPE_MULTIPART) {
++-        return forwardMultipartDirect(pkt);
+++        return forwardMultipartDirect(pkt, d);
++       } else if (pkt->getPayloadType() == PAYLOAD_TYPE_ACK) {
++-        if (!_tables->hasSeen(pkt)) {  // don't retransmit!
+++        if (!_tables->wasSeen(pkt)) {  // don't retransmit!
+++          _tables->markSeen(pkt);
++           removeSelfFromPath(pkt);
++-          routeDirectRecvAcks(pkt, 0);
+++          routeDirectRecvAcks(pkt, d);
++         }
++         return ACTION_RELEASE;
++       }
++ 
++-      if (!_tables->hasSeen(pkt)) {
+++      if (!_tables->wasSeen(pkt)) {
+++        _tables->markSeen(pkt);
++         removeSelfFromPath(pkt);
++ 
++-        uint32_t d = getDirectRetransmitDelay(pkt);
++         return ACTION_RETRANSMIT_DELAYED(0, d);  // Routed traffic is HIGHEST priority 
++       }
++     }
++@@ -117,7 +120,8 @@ DispatcherAction Mesh::onRecvPacket(Packet* pkt) {
++       memcpy(&ack_crc, &pkt->payload[i], 4); i += 4;
++       if (i > pkt->payload_len) {
++         MESH_DEBUG_PRINTLN("%s Mesh::onRecvPacket(): incomplete ACK packet", getLogDateTime());
++-      } else if (!_tables->hasSeen(pkt)) {
+++      } else if (!_tables->wasSeen(pkt)) {
+++        _tables->markSeen(pkt);
++         onAckRecv(pkt, ack_crc);
++         action = routeRecvPacket(pkt);
++       }
++@@ -134,7 +138,8 @@ DispatcherAction Mesh::onRecvPacket(Packet* pkt) {
++       uint8_t* macAndData = &pkt->payload[i];   // MAC + encrypted data 
++       if (i + CIPHER_MAC_SIZE >= pkt->payload_len) {
++         MESH_DEBUG_PRINTLN("%s Mesh::onRecvPacket(): incomplete data packet", getLogDateTime());
++-      } else if (!_tables->hasSeen(pkt)) {
+++      } else if (!_tables->wasSeen(pkt)) {
+++        _tables->markSeen(pkt);
++         // NOTE: this is a 'first packet wins' impl. When receiving from multiple paths, the first to arrive wins.
++         //       For flood mode, the path may not be the 'best' in terms of hops.
++         // FUTURE: could send back multiple paths, using createPathReturn(), and let sender choose which to use(?)
++@@ -155,6 +160,10 @@ DispatcherAction Mesh::onRecvPacket(Packet* pkt) {
++               if (pkt->getPayloadType() == PAYLOAD_TYPE_PATH) {
++                 int k = 0;
++                 uint8_t path_len = data[k++];
+++                if (!Packet::isValidPathLen(path_len)) {
+++                  MESH_DEBUG_PRINTLN("%s PAYLOAD_TYPE_PATH, bad path_len: %u", getLogDateTime(), (uint32_t)path_len);
+++                  break;   // reject bad encoding
+++                }
++                 uint8_t hash_size = (path_len >> 6) + 1;
++                 uint8_t hash_count = path_len & 63;
++                 uint8_t* path = &data[k]; k += hash_size*hash_count;
++@@ -193,7 +202,8 @@ DispatcherAction Mesh::onRecvPacket(Packet* pkt) {
++       uint8_t* macAndData = &pkt->payload[i];   // MAC + encrypted data 
++       if (i + 2 >= pkt->payload_len) {
++         MESH_DEBUG_PRINTLN("%s Mesh::onRecvPacket(): incomplete data packet", getLogDateTime());
++-      } else if (!_tables->hasSeen(pkt)) {
+++      } else if (!_tables->wasSeen(pkt)) {
+++        _tables->markSeen(pkt);
++         if (self_id.isHashMatch(&dest_hash)) {
++           Identity sender(sender_pub_key);
++ 
++@@ -220,7 +230,8 @@ DispatcherAction Mesh::onRecvPacket(Packet* pkt) {
++       uint8_t* macAndData = &pkt->payload[i];   // MAC + encrypted data 
++       if (i + 2 >= pkt->payload_len) {
++         MESH_DEBUG_PRINTLN("%s Mesh::onRecvPacket(): incomplete data packet", getLogDateTime());
++-      } else if (!_tables->hasSeen(pkt)) {
+++      } else if (!_tables->wasSeen(pkt)) {
+++        _tables->markSeen(pkt);
++         // scan channels DB, for all matching hashes of 'channel_hash' (max 4 matches supported ATM)
++         GroupChannel channels[4];
++         int num = searchChannelsByHash(&channel_hash, channels, 4);
++@@ -251,7 +262,8 @@ DispatcherAction Mesh::onRecvPacket(Packet* pkt) {
++         MESH_DEBUG_PRINTLN("%s Mesh::onRecvPacket(): incomplete advertisement packet", getLogDateTime());
++       } else if (self_id.matches(id.pub_key)) {
++         MESH_DEBUG_PRINTLN("%s Mesh::onRecvPacket(): receiving SELF advert packet", getLogDateTime());
++-      } else if (!_tables->hasSeen(pkt)) {
+++      } else if (!_tables->wasSeen(pkt)) {
+++        _tables->markSeen(pkt);
++         uint8_t* app_data = &pkt->payload[i];
++         int app_data_len = pkt->payload_len - i;
++         if (app_data_len > MAX_ADVERT_DATA_SIZE) { app_data_len = MAX_ADVERT_DATA_SIZE; }
++@@ -278,12 +290,19 @@ DispatcherAction Mesh::onRecvPacket(Packet* pkt) {
++       break;
++     }
++     case PAYLOAD_TYPE_RAW_CUSTOM: {
++-      if (pkt->isRouteDirect() && !_tables->hasSeen(pkt)) {
+++      if (pkt->isRouteDirect() && !_tables->wasSeen(pkt)) {
+++        _tables->markSeen(pkt);
++         onRawDataRecv(pkt);
++         //action = routeRecvPacket(pkt);    don't flood route these (yet)
++       }
++       break;
++     }
+++    case PAYLOAD_TYPE_CONTROL: {
+++      if (pkt->isRouteFlood()) {
+++        action = routeRecvPacket(pkt);
+++      }
+++      break;
+++    }
++     case PAYLOAD_TYPE_MULTIPART:
++       if (pkt->payload_len > 2) {
++         uint8_t remaining = pkt->payload[0] >> 4;  // num of packets in this multipart sequence still to be sent
++@@ -296,7 +315,8 @@ DispatcherAction Mesh::onRecvPacket(Packet* pkt) {
++           tmp.payload_len = pkt->payload_len - 1;
++           memcpy(tmp.payload, &pkt->payload[1], tmp.payload_len);
++ 
++-          if (!_tables->hasSeen(&tmp)) {
+++          if (!_tables->wasSeen(&tmp)) {
+++            _tables->markSeen(&tmp);
++             uint32_t ack_crc;
++             memcpy(&ack_crc, tmp.payload, 4);
++ 
++@@ -342,7 +362,7 @@ DispatcherAction Mesh::routeRecvPacket(Packet* packet) {
++   return ACTION_RELEASE;
++ }
++ 
++-DispatcherAction Mesh::forwardMultipartDirect(Packet* pkt) {
+++DispatcherAction Mesh::forwardMultipartDirect(Packet* pkt, uint32_t delay_millis) {
++   uint8_t remaining = pkt->payload[0] >> 4;  // num of packets in this multipart sequence still to be sent
++   uint8_t type = pkt->payload[0] & 0x0F;
++ 
++@@ -353,9 +373,10 @@ DispatcherAction Mesh::forwardMultipartDirect(Packet* pkt) {
++     tmp.payload_len = pkt->payload_len - 1;
++     memcpy(tmp.payload, &pkt->payload[1], tmp.payload_len);
++ 
++-    if (!_tables->hasSeen(&tmp)) {   // don't retransmit!
+++    if (!_tables->wasSeen(&tmp)) {   // don't retransmit!
+++      _tables->markSeen(&tmp);
++       removeSelfFromPath(&tmp);
++-      routeDirectRecvAcks(&tmp, ((uint32_t)remaining + 1) * 300);  // expect multipart ACKs 300ms apart (x2)
+++      routeDirectRecvAcks(&tmp, delay_millis + ((uint32_t)remaining + 1) * 300);  // expect multipart ACKs 300ms apart (x2)
++     }
++   }
++   return ACTION_RELEASE;
++@@ -365,13 +386,13 @@ void Mesh::routeDirectRecvAcks(Packet* packet, uint32_t delay_millis) {
++   if (!packet->isMarkedDoNotRetransmit()) {
++     uint8_t extra = getExtraAckTransmitCount();
++     while (extra > 0) {
++-      delay_millis += getDirectRetransmitDelay(packet) + 300;
++       auto a1 = createMultiAck(packet->payload, packet->payload_len, extra);
++       if (a1) {
++         a1->path_len = Packet::copyPath(a1->path, packet->path, packet->path_len);
++         a1->header &= ~PH_ROUTE_MASK;
++         a1->header |= ROUTE_TYPE_DIRECT;
++         sendPacket(a1, 0, delay_millis);
+++        delay_millis += 300;
++       }
++       extra--;
++     }
++@@ -633,7 +654,7 @@ void Mesh::sendFlood(Packet* packet, uint32_t delay_millis, uint8_t path_hash_si
++   packet->header |= ROUTE_TYPE_FLOOD;
++   packet->setPathHashSizeAndCount(path_hash_size, 0);
++ 
++-  _tables->hasSeen(packet); // mark this packet as already sent in case it is rebroadcast back to us
+++  _tables->markSeen(packet); // mark this packet as already sent in case it is rebroadcast back to us
++ 
++   uint8_t pri;
++   if (packet->getPayloadType() == PAYLOAD_TYPE_PATH) {
++@@ -662,7 +683,7 @@ void Mesh::sendFlood(Packet* packet, uint16_t* transport_codes, uint32_t delay_m
++   packet->transport_codes[1] = transport_codes[1];
++   packet->setPathHashSizeAndCount(path_hash_size, 0);
++ 
++-  _tables->hasSeen(packet); // mark this packet as already sent in case it is rebroadcast back to us
+++  _tables->markSeen(packet); // mark this packet as already sent in case it is rebroadcast back to us
++ 
++   uint8_t pri;
++   if (packet->getPayloadType() == PAYLOAD_TYPE_PATH) {
++@@ -695,7 +716,7 @@ void Mesh::sendDirect(Packet* packet, const uint8_t* path, uint8_t path_len, uin
++       pri = 0;
++     }
++   }
++-  _tables->hasSeen(packet); // mark this packet as already sent in case it is rebroadcast back to us
+++  _tables->markSeen(packet); // mark this packet as already sent in case it is rebroadcast back to us
++   sendPacket(packet, pri, delay_millis);
++ }
++ 
++@@ -705,7 +726,7 @@ void Mesh::sendZeroHop(Packet* packet, uint32_t delay_millis) {
++ 
++   packet->path_len = 0;  // path_len of zero means Zero Hop
++ 
++-  _tables->hasSeen(packet); // mark this packet as already sent in case it is rebroadcast back to us
+++  _tables->markSeen(packet); // mark this packet as already sent in case it is rebroadcast back to us
++ 
++   sendPacket(packet, 0, delay_millis);
++ }
++@@ -718,7 +739,7 @@ void Mesh::sendZeroHop(Packet* packet, uint16_t* transport_codes, uint32_t delay
++ 
++   packet->path_len = 0;  // path_len of zero means Zero Hop
++ 
++-  _tables->hasSeen(packet); // mark this packet as already sent in case it is rebroadcast back to us
+++  _tables->markSeen(packet); // mark this packet as already sent in case it is rebroadcast back to us
++ 
++   sendPacket(packet, 0, delay_millis);
++ }
++diff --git a/src/Mesh.h b/src/Mesh.h
++index 2302d6b5..22bb5c6d 100644
++--- a/src/Mesh.h
+++++ b/src/Mesh.h
++@@ -15,8 +15,9 @@ public:
++ */
++ class MeshTables {
++ public:
++-  virtual bool hasSeen(const Packet* packet) = 0;
++-  virtual void clear(const Packet* packet) = 0;   // remove this packet hash from table
+++  virtual bool wasSeen(const Packet* packet) = 0;
+++  virtual void markSeen(const Packet* packet) = 0;
+++  virtual void clear(const Packet* packet) = 0;    // remove this packet hash from table
++ };
++ 
++ /**
++@@ -31,7 +32,7 @@ class Mesh : public Dispatcher {
++   void removeSelfFromPath(Packet* packet);
++   void routeDirectRecvAcks(Packet* packet, uint32_t delay_millis);
++   //void routeRecvAcks(Packet* packet, uint32_t delay_millis);
++-  DispatcherAction forwardMultipartDirect(Packet* pkt);
+++  DispatcherAction forwardMultipartDirect(Packet* pkt, uint32_t delay_millis);
++ 
++ protected:
++   DispatcherAction onRecvPacket(Packet* pkt) override;
++@@ -100,7 +101,7 @@ protected:
++    * \param  auth_code   a code to authenticate the packet
++    * \param  flags       zero for now
++    * \param  path_snrs   single byte SNR*4 for each hop in the path
++-   * \param  path_hashes hashes if each repeater in the path
+++   * \param  path_hashes hashes of each repeater in the path
++    * \param  path_len    length of the path_snrs[] and path_hashes[] arrays
++   */
++   virtual void onTraceRecv(Packet* packet, uint32_t tag, uint32_t auth_code, uint8_t flags, const uint8_t* path_snrs, const uint8_t* path_hashes, uint8_t path_len) { }
++diff --git a/src/helpers/radiolib/CustomSX1262.h b/src/helpers/radiolib/CustomSX1262.h
++index ad201229..f4e6b759 100644
++--- a/src/helpers/radiolib/CustomSX1262.h
+++++ b/src/helpers/radiolib/CustomSX1262.h
++@@ -42,11 +42,11 @@ class CustomSX1262 : public SX1262 {
++       if (spi) spi->begin(P_LORA_SCLK, P_LORA_MISO, P_LORA_MOSI);
++     #endif
++   #endif
++-      int status = begin(LORA_FREQ, LORA_BW, LORA_SF, cr, RADIOLIB_SX126X_SYNC_WORD_PRIVATE, LORA_TX_POWER, 16, tcxo);
+++      int status = begin(LORA_FREQ, LORA_BW, LORA_SF, cr, RADIOLIB_SX126X_SYNC_WORD_PUBLIC, LORA_TX_POWER, 8, tcxo);
++       // if radio init fails with -707/-706, try again with tcxo voltage set to 0.0f
++       if (status == RADIOLIB_ERR_SPI_CMD_FAILED || status == RADIOLIB_ERR_SPI_CMD_INVALID) {
++         tcxo = 0.0f;
++-        status = begin(LORA_FREQ, LORA_BW, LORA_SF, cr, RADIOLIB_SX126X_SYNC_WORD_PRIVATE, LORA_TX_POWER, 16, tcxo);
+++        status = begin(LORA_FREQ, LORA_BW, LORA_SF, cr, RADIOLIB_SX126X_SYNC_WORD_PUBLIC, LORA_TX_POWER, 8, tcxo);
++       }
++       if (status != RADIOLIB_ERR_NONE) {
++         Serial.print("ERROR: radio init failed: ");
++@@ -97,4 +97,4 @@ class CustomSX1262 : public SX1262 {
++       readRegister(RADIOLIB_SX126X_REG_RX_GAIN, &rxGain, 1);
++       return (rxGain == RADIOLIB_SX126X_RX_GAIN_BOOSTED);
++     }
++-};
++\ No newline at end of file
+++};
++diff --git a/variants/t1000-e/target.cpp b/variants/t1000-e/target.cpp
++index 42532827..9fde4984 100644
++--- a/variants/t1000-e/target.cpp
+++++ b/variants/t1000-e/target.cpp
++@@ -54,7 +54,7 @@ bool radio_init() {
++ 
++   SPI.setPins(P_LORA_MISO, P_LORA_SCLK, P_LORA_MOSI);
++   SPI.begin();
++-  int status = radio.begin(LORA_FREQ, LORA_BW, LORA_SF, LORA_CR, RADIOLIB_LR11X0_LORA_SYNC_WORD_PRIVATE, LORA_TX_POWER, 16, tcxo);
+++  int status = radio.begin(LORA_FREQ, LORA_BW, LORA_SF, LORA_CR, RADIOLIB_LR11X0_LORA_SYNC_WORD_PUBLIC, LORA_TX_POWER, 16, tcxo);
++   if (status != RADIOLIB_ERR_NONE) {
++     Serial.print("ERROR: radio init failed: ");
++     Serial.println(status);
++diff --git a/variants/wio-e5-mini/platformio.ini b/variants/wio-e5-mini/platformio.ini
++index 82f01331..6ea8ad43 100644
++--- a/variants/wio-e5-mini/platformio.ini
+++++ b/variants/wio-e5-mini/platformio.ini
++@@ -31,7 +31,7 @@ build_src_filter = ${lora_e5_mini.build_src_filter}
++ extends = lora_e5_mini
++ build_flags = ${lora_e5_mini.build_flags}
++   -D LORA_TX_POWER=22
++-  -D ADVERT_NAME='"wio-e5-mini Sensor"'
+++  -D ADVERT_NAME='"wio-e5-mini Sensor3"'
++   -D ADMIN_PASSWORD='"password"'
++ build_src_filter = ${lora_e5_mini.build_src_filter}
++   +<../examples/simple_sensor>
++@@ -54,3 +54,8 @@ lib_deps = ${lora_e5_mini.lib_deps}
++ extends = lora_e5_mini
++ build_src_filter = ${lora_e5_mini.build_src_filter}
++   +<../examples/kiss_modem/>
+++  ; ----------------- MARWANE CUSTOM ENVS -------
+++[env:wio-e5-mini_room_server]
+++extends = lora_e5_mini
+++build_src_filter = ${lora_e5_mini.build_src_filter} +<../examples/simple_room_server>
+++build_flags = ${lora_e5_mini.build_flags} -DLORA_TX_POWER=-9 -Ivariants/wio-e5-mini
++diff --git a/variants/wio-e5-mini/target.cpp b/variants/wio-e5-mini/target.cpp
++index 92775d55..b7117721 100644
++--- a/variants/wio-e5-mini/target.cpp
+++++ b/variants/wio-e5-mini/target.cpp
++@@ -33,7 +33,7 @@ bool radio_init() {
++ 
++   radio.setRfSwitchTable(rfswitch_pins, rfswitch_table);
++ 
++-  int status = radio.begin(LORA_FREQ, LORA_BW, LORA_SF, LORA_CR, RADIOLIB_SX126X_SYNC_WORD_PRIVATE, LORA_TX_POWER, 16, 1.7, 0);
+++  int status = radio.begin(LORA_FREQ, LORA_BW, LORA_SF, LORA_CR, RADIOLIB_SX126X_SYNC_WORD_PUBLIC, LORA_TX_POWER, 8, 1.7, 0);
++ 
++   if (status != RADIOLIB_ERR_NONE) {
++     Serial.print("ERROR: radio init failed: ");
++@@ -76,4 +76,4 @@ bool WIOE5SensorManager::begin() {
++   has_bme = bme.begin();
++ 
++   return has_bme;
++-}
++\ No newline at end of file
+++}

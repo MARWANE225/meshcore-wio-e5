@@ -1,15 +1,27 @@
 #pragma once
 
 #include <Arduino.h>   // needed for PlatformIO
+
+// --- 1. LE PATCH STM32 (Tuer la macro AVANT de charger le Mesh) ---
+#if defined(ARDUINO_ARCH_STM32)
+  #include <stm32wlxx.h>
+  #undef RNG
+#endif
+// ------------------------------------------------------------------
+
 #include <Mesh.h>
 
+// --- 2. LE PATCH MEMOIRE (Adafruit_LittleFS pour le Wio-E5) ---
 #if defined(NRF52_PLATFORM)
   #include <InternalFileSystem.h>
+#elif defined(ARDUINO_ARCH_STM32)
+  #include <Adafruit_LittleFS.h>    // <-- La bonne librairie pour ta carte !
 #elif defined(RP2040_PLATFORM)
   #include <LittleFS.h>
 #elif defined(ESP32)
   #include <SPIFFS.h>
 #endif
+// --------------------------------------------------------------
 
 #include <helpers/ArduinoHelpers.h>
 #include <helpers/StaticPoolPacketManager.h>

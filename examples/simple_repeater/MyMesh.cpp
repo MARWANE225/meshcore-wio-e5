@@ -211,6 +211,10 @@ uint8_t MyMesh::handleAnonClockReq(const mesh::Identity& sender, uint32_t sender
 int MyMesh::handleRequest(ClientInfo *sender, uint32_t sender_timestamp, uint8_t *payload, size_t payload_len) {
   // uint32_t now = getRTCClock()->getCurrentTimeUnique();
   // memcpy(reply_data, &now, 4);   // response packets always prefixed with timestamp
+char buf[245];
+sprintf(buf,"JMF: handleRequest %x\r\n",payload[0]);
+Serial.print(buf);
+
   memcpy(reply_data, &sender_timestamp, 4); // reflect sender_timestamp back in response packet (kind of like a 'tag')
 
   if (payload[0] == REQ_TYPE_GET_STATUS) {  // guests can also access this now
@@ -396,7 +400,7 @@ File MyMesh::openAppend(const char *fname) {
 static uint8_t max_loop_minimal[] =  { 0, /* 1-byte */  4, /* 2-byte */  2, /* 3-byte */  1 };
 static uint8_t max_loop_moderate[] = { 0, /* 1-byte */  2, /* 2-byte */  1, /* 3-byte */  1 };
 static uint8_t max_loop_strict[] =   { 0, /* 1-byte */  1, /* 2-byte */  1, /* 3-byte */  1 };
-
+//Marwane ici le repeteur passe le nouveau packet à cette fonction, il regarde la trace laissée dans le packet. s'il voit qu'il a deja relayé ce packet il y a quelque millusecondes, il le jette sinon il le relaie.
 bool MyMesh::isLooped(const mesh::Packet* packet, const uint8_t max_counters[]) {
   uint8_t hash_size = packet->getPathHashSize();
   uint8_t hash_count = packet->getPathHashCount();
@@ -432,6 +436,8 @@ void MyMesh::sendFloodReply(mesh::Packet* packet, unsigned long delay_millis, ui
 }
 
 bool MyMesh::allowPacketForward(const mesh::Packet *packet) {
+Serial.print("JMF allow packet fwd\r\n"); 
+return true; // JMF
   if (_prefs.disable_fwd) return false;
   if (packet->isRouteFlood()
       && mesh::isFloodHopLimitExceeded(packet, _prefs.flood_max, _prefs.flood_max_unscoped, _prefs.flood_max_advert)) {
@@ -468,6 +474,12 @@ const char *MyMesh::getLogDateTime() {
 }
 
 void MyMesh::logRxRaw(float snr, float rssi, const uint8_t raw[], int len) {
+  // --- MARWANE AJOUT : Affichage forcé en RAW pour le debug ---
+  Serial.print("\r\n[RAW RX] ");
+  mesh::Utils::printHex(Serial, raw, len); // Affiche les octets en Hexadécimal
+  Serial.print("\r\n");
+  // ---------------------MARWANE 30/06---------------------------------------
+
 #if MESH_PACKET_LOGGING
   Serial.print(getLogDateTime());
   Serial.print(" RAW: ");
@@ -482,7 +494,13 @@ void MyMesh::logRx(mesh::Packet *pkt, int len, float score) {
     bridge.sendPacket(pkt);
   }
 #endif
-
+// --- MARWANE AJOUT : logRx avec détection du type de routage ---
+  Serial.printf("\r\n>>> [REPEATER] Paquet intercepté ! Type: %d | Route: %s | RSSI: %d | Hops: %d <<<\r\n", 
+                pkt->getPayloadType(), 
+                pkt->isRouteDirect() ? "DIRECT" : "FLOOD",
+                (int)_radio->getLastRSSI(), 
+                pkt->getPathHashCount());
+// ---------------------------------------------------------------
   if (_logging) {
     File f = openAppend(PACKET_LOG_FILE);
     if (f) {
@@ -503,12 +521,29 @@ void MyMesh::logRx(mesh::Packet *pkt, int len, float score) {
 }
 
 void MyMesh::logTx(mesh::Packet *pkt, int len) {
+  uint8_t raw[256];
+  int n = pkt->writeTo(raw);   // trame exacte envoyée : en-tête + chemin + données
+
+  Serial.printf("\r\n<<< [REPEATER] Paquet relayé (TX) ! Type: %d | Route: %s | Hops: %d <<<\r\n",
+                pkt->getPayloadType(),
+                pkt->isRouteDirect() ? "DIRECT" : "FLOOD",
+                pkt->getPathHashCount());
+  Serial.print("[RAW TX] ");
+  mesh::Utils::printHex(Serial, raw, n);
+  Serial.print("\r\n");
+// ---------------------------------------------------------------
+
 #ifdef WITH_BRIDGE
   if (_prefs.bridge_pkt_src == 0) {
     bridge.sendPacket(pkt);
   }
 #endif
-
+// --- Marwane Ajout ---
+       Serial.printf("\r\n>>> [REPEATER] Paquet recu ! Type: %d | RSSI: %d | Hops: %d <<<\r\n", 
+                pkt->getPayloadType(), 
+                (int)_radio->getLastRSSI(), 
+                pkt->getPathHashCount());
+//------------------------------------------
   if (_logging) {
     File f = openAppend(PACKET_LOG_FILE);
     if (f) {
@@ -570,6 +605,7 @@ mesh::DispatcherAction MyMesh::onRecvPacket(mesh::Packet* pkt) {
 
 void MyMesh::onAnonDataRecv(mesh::Packet *packet, const uint8_t *secret, const mesh::Identity &sender,
                             uint8_t *data, size_t len) {
+Serial.print("JMF anon data recv\r\n");
   if (packet->getPayloadType() == PAYLOAD_TYPE_ANON_REQ) { // received an initial request by a possible admin
                                                            // client (unknown at this stage)
     uint32_t timestamp;
@@ -590,7 +626,7 @@ void MyMesh::onAnonDataRecv(mesh::Packet *packet, const uint8_t *secret, const m
     } else {
       reply_len = 0;  // unknown/invalid request type
     }
-
+//irec
     if (reply_len == 0) return;   // invalid request
 
     // a DIRECT login can reply via the stored out_path, as onPeerDataRecv() does for REQ
@@ -651,10 +687,11 @@ void MyMesh::onAdvertRecv(mesh::Packet *packet, const mesh::Identity &id, uint32
                           const uint8_t *app_data, size_t app_data_len) {
   mesh::Mesh::onAdvertRecv(packet, id, timestamp, app_data, app_data_len); // chain to super impl
 
-  // if this a zero hop advert (and not via 'Share'), add it to neighbours
+  // if this a zero hop advert (and not via 'Share'), add it to neighbours ------Marwane---
   if (packet->getPathHashCount() == 0 && !isShare(packet)) {
     AdvertDataParser parser(app_data, app_data_len);
-    if (parser.isValid() && parser.getType() == ADV_TYPE_REPEATER) { // just keep neigbouring Repeaters
+    // --- MARWANE AJOUT : On accepte les Repeaters ET les Sensors JE CROIS QUE LE REPEATER EST UN PEU RACISTE ET RETOURNE QUE LES AUTRES REPEATER---
+    if (parser.isValid() && (parser.getType() == ADV_TYPE_REPEATER || parser.getType() == ADV_TYPE_SENSOR)) { 
       putNeighbour(id, timestamp, packet->getSNR());
     }
   }
@@ -668,6 +705,7 @@ void MyMesh::onPeerDataRecv(mesh::Packet *packet, uint8_t type, int sender_idx, 
     return;
   }
   ClientInfo* client = acl.getClientByIdx(i);
+Serial.print("JMF peer data recv\r\n");
 
   if (type == PAYLOAD_TYPE_REQ) { // request (from a Known admin client!)
     uint32_t timestamp;
@@ -766,6 +804,7 @@ void MyMesh::onPeerDataRecv(mesh::Packet *packet, uint8_t type, int sender_idx, 
 bool MyMesh::onPeerPathRecv(mesh::Packet *packet, int sender_idx, const uint8_t *secret, uint8_t *path,
                             uint8_t path_len, uint8_t extra_type, uint8_t *extra, uint8_t extra_len) {
   // TODO: prevent replay attacks
+Serial.print("JMF peer path recv\r\n");
   int i = matching_peer_indexes[sender_idx];
 
   if (i >= 0 && i < acl.getNumClients()) { // get from our known_clients table (sender SHOULD already be known in this context)
@@ -788,6 +827,7 @@ bool MyMesh::onPeerPathRecv(mesh::Packet *packet, int sender_idx, const uint8_t 
 
 void MyMesh::onControlDataRecv(mesh::Packet* packet) {
   uint8_t type = packet->payload[0] & 0xF0;    // just test upper 4 bits
+Serial.print("JMF ctrl data recv\r\n");
   if (type == CTL_TYPE_NODE_DISCOVER_REQ && packet->payload_len >= 6
       && !_prefs.disable_fwd && discover_limiter.allow(rtc_clock.getCurrentTime())
       && !isHiddenNode()   // this node wishes to NOT be discoverable
@@ -817,7 +857,8 @@ void MyMesh::onControlDataRecv(mesh::Packet* packet) {
     }
   } else if (type == CTL_TYPE_NODE_DISCOVER_RESP && packet->payload_len >= 6) {
     uint8_t node_type = packet->payload[0] & 0x0F;
-    if (node_type != ADV_TYPE_REPEATER) {
+    //Marwane
+    if (node_type != ADV_TYPE_REPEATER && node_type != ADV_TYPE_SENSOR) {
       return;
     }
     if (packet->payload_len < 6 + PUB_KEY_SIZE) {
@@ -844,9 +885,12 @@ void MyMesh::onControlDataRecv(mesh::Packet* packet) {
 }
 
 void MyMesh::sendNodeDiscoverReq() {
+Serial.print("JMF sendNodeDiscovery\r\n");
   uint8_t data[10];
   data[0] = CTL_TYPE_NODE_DISCOVER_REQ; // prefix_only=0
-  data[1] = (1 << ADV_TYPE_REPEATER);
+  //--------MARWANE---------
+  data[1] = (1 << ADV_TYPE_REPEATER) | (1 << ADV_TYPE_SENSOR);
+  //------------------------
   getRNG()->random(&data[2], 4); // tag
   memcpy(&pending_discover_tag, &data[2], 4);
   pending_discover_until = futureMillis(60000);
@@ -1052,6 +1096,7 @@ void MyMesh::updateAdvertTimer() {
 }
 
 void MyMesh::updateFloodAdvertTimer() {
+Serial.print("JMF flood advert\r\n");
   if (_prefs.flood_advert_interval > 0) { // schedule flood advert timer
     next_flood_advert = futureMillis(((uint32_t)_prefs.flood_advert_interval) * 60 * 60 * 1000);
   } else {
@@ -1287,6 +1332,23 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply
 }
 
 void MyMesh::loop() {
+// --- AJOUT : AFFICHAGE AUTOMATIQUE DES VOISINS Marwane a été ici---
+  static unsigned long next_auto_dump = 0;
+  if (next_auto_dump == 0 || millisHasNowPassed(next_auto_dump)) {
+    char reply[512] = {0};
+    formatNeighborsReply(reply);
+    
+    // On n'affiche que s'il y a au moins un voisin trouvé
+    if (strlen(reply) > 0) {
+      Serial.printf("\n[AUTO-DISCOVERY] Voisins actuels : %s\n", reply);
+    } else {
+      Serial.println("\n[AUTO-DISCOVERY] Aucun voisin détecté pour le moment...");
+    }
+    
+    // Programme le prochain affichage dans 30 secondes (30000 ms)
+    next_auto_dump = futureMillis(30000); 
+  }
+  // -------------------------------------------------
 #ifdef WITH_BRIDGE
   bridge.loop();
 #endif

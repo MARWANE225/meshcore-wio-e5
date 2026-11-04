@@ -17,7 +17,7 @@
   #define LORA_CR      5
 #endif
 #ifndef LORA_TX_POWER
-  #define LORA_TX_POWER  20
+  #define LORA_TX_POWER  -20
 #endif
 
 #ifndef ADVERT_NAME
@@ -255,6 +255,7 @@ uint8_t SensorMesh::handleRequest(ClientInfo* from, uint32_t sender_timestamp, u
 mesh::Packet* SensorMesh::createSelfAdvert() {
   uint8_t app_data[MAX_ADVERT_DATA_SIZE];
   uint8_t app_data_len = _cli.buildAdvertData(ADV_TYPE_SENSOR, app_data);
+  Serial.print("JMF createSelfAdvert\r\n");
 
   return createAdvert(self_id, app_data, app_data_len);
 }
@@ -272,9 +273,10 @@ void SensorMesh::sendAlert(const ClientInfo* c, Trigger* t) {
   t->attempt++;
 
   auto pkt = createDatagram(PAYLOAD_TYPE_TXT_MSG, c->id, c->shared_secret, data, 5 + text_len);
-  if (pkt) {
+  if (pkt) { // Si je connais le chemin je pars directement, sinn je crie (Flood)
     if (c->out_path_len != OUT_PATH_UNKNOWN) {  // we have an out_path, so send DIRECT
       sendDirect(pkt, c->out_path, c->out_path_len);
+      Serial.print("\tSI je connais le chemin\t");
     } else {
       unsigned long delay_millis = 0;
       sendFloodScoped(default_scope, pkt, delay_millis, _prefs.path_hash_mode + 1);
@@ -284,6 +286,20 @@ void SensorMesh::sendAlert(const ClientInfo* c, Trigger* t) {
 }
 
 void SensorMesh::alertIf(bool condition, Trigger& t, AlertPriority pri, const char* text) {
+  if (text[0]=='P') // JMF force periodic
+    {
+      StrHelper::strncpy(t.text, text, sizeof(t.text));
+      t.pri = pri;
+      t.send_expiry = 0;  // signal that initial send is needed
+      t.attempt = 3;      // JMF was 4
+      t.curr_contact_idx = -1;  // start iterating thru contacts[]
+
+      alert_tasks[num_alert_tasks++] = &t;  // add to queue
+
+      Serial.print(getRTCClock()->getCurrentTime());
+      Serial.print(num_alert_tasks);
+      Serial.print("\tJMF alert create\t");
+    }
   if (condition) {
     if (!t.isTriggered() && num_alert_tasks < MAX_CONCURRENT_ALERTS) {
       StrHelper::strncpy(t.text, text, sizeof(t.text));
@@ -310,6 +326,8 @@ void SensorMesh::alertIf(bool condition, Trigger& t, AlertPriority pri, const ch
       }
     }
   }
+  Serial.print(num_alert_tasks);
+  Serial.print("\r\n");
 }
 
 float SensorMesh::getAirtimeBudgetFactor() const {
@@ -397,10 +415,13 @@ uint8_t SensorMesh::handleLoginReq(const mesh::Identity& sender, const uint8_t* 
     dirty_contacts_expiry = futureMillis(LAZY_CONTACTS_WRITE_DELAY);
   }
 
-  if (is_flood) {
-    client->out_path_len = OUT_PATH_UNKNOWN;  // need to rediscover out_path
+  //if (is_flood) {
+    //client->out_path_len = OUT_PATH_UNKNOWN;  // need to rediscover out_path
+  //}
+//Marwane a été la, je force le sensor pour qu'il oublie le trajet direct 
+  for (int i = 0; i < acl.getNumClients(); i++) {
+    acl.getClientByIdx(i)->out_path_len = OUT_PATH_UNKNOWN; 
   }
-
   uint32_t now = getRTCClock()->getCurrentTimeUnique();
   memcpy(reply_data, &now, 4);   // response packets always prefixed with timestamp
   reply_data[4] = RESP_SERVER_LOGIN_OK;
@@ -1101,6 +1122,7 @@ void SensorMesh::loop() {
       } else if (t->curr_contact_idx < acl.getNumClients()) {
         auto c = acl.getClientByIdx(t->curr_contact_idx);   // send next attempt
         sendAlert(c, t);  // NOTE: modifies attempt, expected_acks[] and send_expiry
+        Serial.print("JMF sendAlert\r\n");
       } else {
         // contact list has likely been modified while waiting for alert ACK, cancel this task
         t->attempt = 4;   // next ::loop() will remove t from queue

@@ -137,17 +137,19 @@ mesh::Packet *MyMesh::createSelfAdvert() {
 
   return createAdvert(self_id, app_data, app_data_len);
 }
-
+/*
 File MyMesh::openAppend(const char *fname) {
 #if defined(NRF52_PLATFORM)
   return _fs->open(fname, FILE_O_WRITE);
+#elif defined(ARDUINO_ARCH_STM32)
+  return _fs->open(fname, Adafruit_LittleFS_Namespace::FILE_O_WRITE);  // <--- AJOUT POUR WIO-E5
 #elif defined(RP2040_PLATFORM)
   return _fs->open(fname, "a");
 #else
   return _fs->open(fname, "a", true);
 #endif
 }
-
+*/
 int MyMesh::handleRequest(ClientInfo *sender, uint32_t sender_timestamp, uint8_t *payload,
                           size_t payload_len) {
   // uint32_t now = getRTCClock()->getCurrentTimeUnique();
@@ -226,6 +228,11 @@ void MyMesh::logRxRaw(float snr, float rssi, const uint8_t raw[], int len) {
 }
 
 void MyMesh::logRx(mesh::Packet *pkt, int len, float score) {
+Serial.printf("\n>>> [ROOM SERVER] Paquet intercepté ! Type: %d | Route: %s | Taille: %d <<<\n", 
+                pkt->getPayloadType(), 
+                pkt->isRouteDirect() ? "Direct" : "Flood", 
+                pkt->payload_len);
+                /*
   if (_logging) {
     File f = openAppend(PACKET_LOG_FILE);
     if (f) {
@@ -242,9 +249,9 @@ void MyMesh::logRx(mesh::Packet *pkt, int len, float score) {
       }
       f.close();
     }
-  }
+  }*/
 }
-void MyMesh::logTx(mesh::Packet *pkt, int len) {
+void MyMesh::logTx(mesh::Packet *pkt, int len) {/*
   if (_logging) {
     File f = openAppend(PACKET_LOG_FILE);
     if (f) {
@@ -260,9 +267,9 @@ void MyMesh::logTx(mesh::Packet *pkt, int len) {
       }
       f.close();
     }
-  }
+  }*/
 }
-void MyMesh::logTxFail(mesh::Packet *pkt, int len) {
+void MyMesh::logTxFail(mesh::Packet *pkt, int len) {/*
   if (_logging) {
     File f = openAppend(PACKET_LOG_FILE);
     if (f) {
@@ -271,7 +278,7 @@ void MyMesh::logTxFail(mesh::Packet *pkt, int len) {
                pkt->isRouteDirect() ? "D" : "F", pkt->payload_len);
       f.close();
     }
-  }
+  }*/
 }
 
 int MyMesh::calcRxDelay(float score, uint32_t air_time) const {
@@ -696,11 +703,28 @@ MyMesh::MyMesh(mesh::MainBoard &board, mesh::Radio &radio, mesh::MillisecondCloc
 void MyMesh::begin(FILESYSTEM *fs) {
   mesh::Mesh::begin();
   _fs = fs;
-  // load persisted prefs
-  _cli.loadPrefs(_fs);
 
-  acl.load(_fs, self_id);
-  region_map.load(_fs);
+  // ---> LE PATCH ANTI-CRASH <---
+  if (_fs != NULL) {
+    // load persisted prefs
+    _cli.loadPrefs(_fs);
+
+    acl.load(_fs, self_id);
+    for (int i = 0; i < acl.getNumClients(); i++) {
+      acl.getClientByIdx(i)->out_path_len = OUT_PATH_UNKNOWN; 
+    }
+    region_map.load(_fs);
+  } else {
+    // ---> LE NOUVEAU PATCH RADIO (Pour la tourbière) <---
+    // Comme on n'a pas de mémoire, on force les paramètres LoRa par défaut
+    _prefs.freq = 868.1;       // Fréquence Europe
+    _prefs.bw = 125.0;         // Bande passante classique
+    _prefs.sf = 9;             // Spreading Factor robuste
+    _prefs.cr = 5;             // Coding Rate (4/5)
+    _prefs.tx_power_dbm = 14;  // Puissance d'émission standard
+    _prefs.adc_multiplier = 1.0;
+    // -----------------------------------------------------
+  }
 
   // establish default-scope
   {
@@ -711,8 +735,8 @@ void MyMesh::begin(FILESYSTEM *fs) {
 #ifdef DEFAULT_FLOOD_SCOPE_NAME
       r = region_map.findByName(DEFAULT_FLOOD_SCOPE_NAME);
       if (r == NULL) {
-        r = region_map.putRegion(DEFAULT_FLOOD_SCOPE_NAME, 0);  // auto-create the default scope region
-        if (r) { r->flags = 0; }   // Allow-flood
+        r = region_map.putRegion(DEFAULT_FLOOD_SCOPE_NAME, 0);  
+        if (r) { r->flags = 0; }   
       }
       if (r) {
         region_map.setDefaultRegion(r);
@@ -722,6 +746,7 @@ void MyMesh::begin(FILESYSTEM *fs) {
     }
   }
 
+  // C'est ici que la radio s'allume avec nos paramètres !
   radio_driver.setParams(_prefs.freq, _prefs.bw, _prefs.sf, _prefs.cr);
   radio_driver.setTxPower(_prefs.tx_power_dbm);
   radio_driver.setRxBoostedGainMode(_prefs.rx_boosted_gain);
@@ -737,7 +762,6 @@ void MyMesh::begin(FILESYSTEM *fs) {
   applyGpsPrefs();
 #endif
 }
-
 void MyMesh::sendFloodScoped(const TransportKey& scope, mesh::Packet* pkt, uint32_t delay_millis, uint8_t path_hash_size) {
   if (scope.isNull()) {
     sendFlood(pkt, delay_millis, path_hash_size);
@@ -781,8 +805,10 @@ void MyMesh::applyTempRadioParams(float freq, float bw, uint8_t sf, uint8_t cr, 
 }
 
 bool MyMesh::formatFileSystem() {
-#if defined(NRF52_PLATFORM)
+/*#if defined(NRF52_PLATFORM)
   return InternalFS.format();
+#elif defined(ARDUINO_ARCH_STM32)
+  return InternalFS.format();               // <--- AJOUT POUR WIO-E5
 #elif defined(RP2040_PLATFORM)
   return LittleFS.format();
 #elif defined(ESP32)
@@ -790,9 +816,9 @@ bool MyMesh::formatFileSystem() {
 #else
 #error "need to implement file system erase"
   return false;
-#endif
+#endif */
+return true;  // On simule un succès
 }
-
 void MyMesh::sendSelfAdvertisement(int delay_millis, bool flood) {
   mesh::Packet *pkt = createSelfAdvert();
   if (pkt) {
@@ -822,7 +848,7 @@ void MyMesh::updateFloodAdvertTimer() {
 }
 
 void MyMesh::dumpLogFile() {
-#if defined(RP2040_PLATFORM)
+/*#if defined(RP2040_PLATFORM)
   File f = _fs->open(PACKET_LOG_FILE, "r");
 #else
   File f = _fs->open(PACKET_LOG_FILE);
@@ -835,6 +861,7 @@ void MyMesh::dumpLogFile() {
     }
     f.close();
   }
+  */
 }
 
 void MyMesh::setTxPower(int8_t power_dbm) {

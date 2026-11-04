@@ -297,6 +297,12 @@ DispatcherAction Mesh::onRecvPacket(Packet* pkt) {
       }
       break;
     }
+    case PAYLOAD_TYPE_CONTROL: {
+      if (pkt->isRouteFlood()) {
+        action = routeRecvPacket(pkt);
+      }
+      break;
+    }
     case PAYLOAD_TYPE_MULTIPART:
       if (pkt->payload_len > 2) {
         uint8_t remaining = pkt->payload[0] >> 4;  // num of packets in this multipart sequence still to be sent
