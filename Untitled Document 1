@@ -1,0 +1,44 @@
+git diff > mes_modifications_wio_e5.diff
+
+
+diff -u chemin/vers/MyMesh_original.h examples/simple_room_server/MyMesh.h
+marwane@fedora:~/MeshCore/examples/simple_room_server$ gedit MyMesh.cpp
+marwane@fedora:~/MeshCore/examples/simple_room_server$ ping 192.168.1.1
+PING 192.168.1.1 (192.168.1.1) 56(84) bytes of data.
+64 bytes from 192.168.1.1: icmp_seq=1 ttl=64 time=0.576 ms
+64 bytes from 192.168.1.1: icmp_seq=2 ttl=64 time=0.689 ms
+^C
+--- 192.168.1.1 ping statistics ---
+2 packets transmitted, 2 received, 0% packet loss, time 1060ms
+rtt min/avg/max/mdev = 0.576/0.632/0.689/0.056 ms
+marwane@fedora:~/MeshCore/examples/simple_room_server$ ping 192.168.1.170
+PING 192.168.1.170 (192.168.1.170) 56(84) bytes of data.
+64 bytes from 192.168.1.170: icmp_seq=1 ttl=64 time=0.346 ms
+64 bytes from 192.168.1.170: icmp_seq=2 ttl=64 time=0.236 ms
+64 bytes from 192.168.1.170: icmp_seq=3 ttl=64 time=0.221 ms
+^C
+--- 192.168.1.170 ping statistics ---
+3 packets transmitted, 3 received, 0% packet loss, time 2076ms
+rtt min/avg/max/mdev = 0.221/0.267/0.346/0.055 ms
+marwane@fedora:~/MeshCore/examples/simple_room_server$ mosquitto
+mosquitto         mosquitto_ctrl    mosquitto_passwd  mosquitto_pub     mosquitto_rr      mosquitto_sub
+marwane@fedora:~/MeshCore/examples/simple_room_server$ mosquitto_sub -h 192.168.1.170 -t "#" -v
+gateway/0016c001ff10d6dc/state/conn {"gatewayID":"ABbAAf8Q1tw=","state":"OFFLINE"}
+gateway/0016c001ff10dd7f/state/conn 
+���
+eu868/gateway/0016c001ff10d6dc/state/conn {"gatewayId":"0016c001ff10d6dc","state":"ONLINE"}
+eu868/gateway/7276ff0039070055/state/conn {"gatewayId":"7276ff0039070055"}
+eu868/gateway/0016c001ff10d6dc/event/stats {"gatewayId":"0016c001ff10d6dc","time":"2026-07-10T15:44:34Z","location":{"latitude":47.251579,"longitude":5.993251,"altitude":366,"source":"GPS"},"rxPacketsReceived":1,"rxPacketsReceivedOk":1,"rxPacketsPerFrequency":{"868500000":1},"rxPacketsPerModulation":[{"modulation":{"lora":{"bandwidth":125000,"spreadingFactor":10,"codeRate":"CR_4_5"}},"count":1}]}
+eu868/gateway/0016c001ff10d6dc/event/up {"phyPayload":"AAEAKgDAJOEkZCgIT0Uk4SQqKQQXSCM=","txInfo":{"frequency":868300000,"modulation":{"lora":{"bandwidth":125000,"spreadingFactor":10,"codeRate":"CR_4_5"}}},"rxInfo":{"gatewayId":"0016c001ff10d6dc","uplinkId":62131,"gwTime":"2026-07-10T15:44:42.470755742Z","rssi":-89,"snr":13.75,"channel":1,"rfChain":1,"context":"8W+fLw==","crcStatus":"CRC_OK"}}
+eu868/gateway/0016c001ff10d6dc/event/stats {"gatewayId":"0016c001ff10d6dc","time":"2026-07-10T15:45:04Z","location":{"latitude":47.251579,"longitude":5.993251,"altitude":366,"source":"GPS"},"rxPacketsReceived":1,"rxPacketsReceivedOk":1,"rxPacketsPerFrequency":{"868300000":1},"rxPacketsPerModulation":[{"modulation":{"lora":{"bandwidth":125000,"spreadingFactor":10,"codeRate":"CR_4_5"}},"count":1}]}
+marwane@fedora:~/MeshCore/examples/simple_room_server$ $ mosquitto_sub -h 192.168.1.170 -teu868/gateway/0016c001ff10d6dc/event/upup" -v
+
+
+
+^Cmarwane@fedora:~/MeshCore/examples/simple_room_server$ mosquitto_sub -h 192.168.1.170 -t "eu868/gateway/0016c001ff10d6dc/event/up" -v
+eu868/gateway/0016c001ff10d6dc/event/up {"phyPayload":"AAEAKgDAJOEkZCgIT0Uk4SQt2DFr2wk=","txInfo":{"frequency":868300000,"modulation":{"lora":{"bandwidth":125000,"spreadingFactor":10,"codeRate":"CR_4_5"}}},"rxInfo":{"gatewayId":"0016c001ff10d6dc","uplinkId":31405,"gwTime":"2026-07-10T15:45:42.526134256Z","rssi":-87,"snr":13.25,"channel":1,"rfChain":1,"context":"9QP5KQ==","crcStatus":"CRC_OK"}}
+eu868/gateway/0016c001ff10d6dc/event/up {"phyPayload":"AAEAKgDAJOEkZCgIT0Uk4STce5t/D2Q=","txInfo":{"frequency":868500000,"modulation":{"lora":{"bandwidth":125000,"spreadingFactor":10,"codeRate":"CR_4_5"}}},"rxInfo":{"gatewayId":"0016c001ff10d6dc","uplinkId":2647,"gwTime":"2026-07-10T15:46:12.572934122Z","rssi":-87,"snr":11,"channel":2,"rfChain":1,"context":"9s50BA==","crcStatus":"CRC_OK"}}
+eu868/gateway/0016c001ff10d6dc/event/up {"phyPayload":"QCZz2QDAwXAFZbi8LwYydRztOgF4QqWviMs=","txInfo":{"frequency":868500000,"modulation":{"lora":{"bandwidth":125000,"spreadingFactor":12,"codeRate":"CR_4_5"}}},"rxInfo":{"gatewayId":"0016c001ff10d6dc","uplinkId":54693,"gwTime":"2026-07-10T15:46:15.940163540Z","rssi":-132,"snr":-14.25,"channel":2,"rfChain":1,"context":"9wGUag==","crcStatus":"CRC_OK"}}
+
+
+

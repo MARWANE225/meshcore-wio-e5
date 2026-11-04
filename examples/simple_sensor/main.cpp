@@ -5,6 +5,10 @@
   static UITask ui_task(display);
 #endif
 
+#ifndef SENSOR_READ_INTERVAL_SECS
+#define SENSOR_READ_INTERVAL_SECS  60
+#endif
+
 class MyMesh : public SensorMesh {
 public:
   MyMesh(mesh::MainBoard& board, mesh::Radio& radio, mesh::MillisecondClock& ms, mesh::RNG& rng, mesh::RTCClock& rtc, mesh::MeshTables& tables)
@@ -15,7 +19,7 @@ public:
 
 protected:
   /* ========================== custom logic here ========================== */
-  Trigger low_batt, critical_batt;
+  Trigger low_batt, critical_batt, periodic;
   TimeSeriesData  battery_data;
 
   void onSensorDataRead() override {
@@ -24,6 +28,7 @@ protected:
     battery_data.recordData(getRTCClock(), batt_voltage);   // record battery
     alertIf(batt_voltage < 3.4f, critical_batt, HIGH_PRI_ALERT, "Battery is critical!");
     alertIf(batt_voltage < 3.6f, low_batt, LOW_PRI_ALERT, "Battery is low");
+    alertIf(getRTCClock()->getCurrentTime() - last_read_timeJMF >= SENSOR_READ_INTERVAL_SECS, periodic, LOW_PRI_ALERT, "Periodic JMF");
   }
 
   int querySeriesData(uint32_t start_secs_ago, uint32_t end_secs_ago, MinMaxAvg dest[], int max_num) override {
@@ -34,7 +39,22 @@ protected:
   bool handleCustomCommand(uint32_t sender_timestamp, char* command, char* reply) override {
     if (strcmp(command, "magic") == 0) {    // example 'custom' command handling
       strcpy(reply, "**Magic now done**");
-      return true;   // handled
+      return true; // handled
+    } else if (strcmp(command, "temp") == 0) {
+      CayenneLPP telem(25);
+      sensors.querySensors(TELEM_PERM_ENVIRONMENT, telem);
+      uint8_t *buf = telem.getBuffer();
+
+      while (*buf != LPP_TEMPERATURE) {
+        buf++;
+      }
+      buf++;
+
+      int16_t temperature = (*buf << 8) | *(buf + 1);
+
+      sprintf(reply, "measured temperature : %d.%d °C", temperature / 10, temperature % 10);
+      // strcpy(reply, "measured temperature: ");
+      return true; // handled
     }
     return false;  // not handled
   }
@@ -51,6 +71,8 @@ void halt() {
 }
 
 static char command[160];
+
+static uint32_t send_temperature_timer = 0;
 
 void setup() {
   Serial.begin(115200);
@@ -73,6 +95,7 @@ void setup() {
   FILESYSTEM* fs;
 #if defined(NRF52_PLATFORM) || defined(STM32_PLATFORM)
   InternalFS.begin();
+  InternalFS.format();    // <--- L'ÉLECTROCHOC EST ICI
   fs = &InternalFS;
   IdentityStore store(InternalFS, "");
 #elif defined(ESP32)
@@ -110,10 +133,13 @@ void setup() {
   ui_task.begin(the_mesh.getNodePrefs(), FIRMWARE_BUILD_DATE, FIRMWARE_VERSION);
 #endif
 
-  // send out initial zero hop Advertisement to the mesh
+  // send out initial zero hop Advertisement to the mesh//Marwane
 #if ENABLE_ADVERT_ON_BOOT == 1
-  the_mesh.sendSelfAdvertisement(16000, false);
+  the_mesh.sendSelfAdvertisement(16000, true);
 #endif
+
+  // setup next time to send temperature
+  send_temperature_timer = the_mesh.futureMillis(30000);
 }
 
 void loop() {
@@ -135,10 +161,40 @@ void loop() {
     char reply[160];
     the_mesh.handleCommand(0, command, reply);  // NOTE: there is no sender_timestamp via serial!
     if (reply[0]) {
-      Serial.print("  -> "); Serial.println(reply);
+      Serial.print("  -> ");
+      Serial.println(reply);
     }
 
-    command[0] = 0;  // reset command buffer
+    command[0] = 0; // reset command buffer
+  }
+
+  // Test Code to send periodically temperature to neighbours
+  if (send_temperature_timer && the_mesh.millisHasNowPassed(send_temperature_timer)) {
+
+    CayenneLPP telem(25);
+    sensors.querySensors(TELEM_PERM_ENVIRONMENT, telem);
+    uint8_t *buf = telem.getBuffer();
+
+    while (*buf != LPP_TEMPERATURE) {
+      buf++;
+    }
+    buf++;
+
+    int16_t temperature = (*buf << 8) | *(buf + 1);
+
+//    uint8_t raw_data[] = {*buf, *(buf+1)};
+//    uint8_t companion_path[] = {0xd9};
+//    uint8_t companion_path_len = 1;
+    uint8_t raw_data[10]={0,1,2,3,4,5,6,7,8,9};
+    // mesh::Packet* packet = the_mesh.createRawData(raw_data, 10);
+
+/// JMF
+    mesh::Packet *packet = the_mesh.createControlData(raw_data, 10);
+    Serial.println("Temperature sent");
+      the_mesh.sendFlood(packet); // ,0,1); // path hash size = 1 byte ; current path hash count = 0
+//    the_mesh.sendDirect(packet,companion_path,companion_path_len);
+
+    send_temperature_timer = the_mesh.futureMillis(30000); // next temperature send in 30 sec
   }
 
   the_mesh.loop();

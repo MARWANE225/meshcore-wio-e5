@@ -1,0 +1,57 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[french]{babel}
+\usepackage[margin=2cm]{geometry}
+\usepackage{array}
+\newcolumntype{P}[1]{>{\raggedright\arraybackslash}p{#1}}
+
+\title{Comparaison des deux trames reçues par la gateway}
+\date{9 octobre 2026}
+
+\begin{document}
+\maketitle
+
+\section*{Les deux trames}
+
+\begin{itemize}
+  \item \textbf{A} : la trame du capteur, reçue par le repeater (et directement par la gateway).
+  \item \textbf{B} : la trame que la gateway ne comprend pas, émise par le repeater.
+\end{itemize}
+
+\section*{Comparaison}
+
+\begin{center}
+\begin{tabular}{|P{3cm}|P{5cm}|P{6.2cm}|}
+\hline
+ & \textbf{A : trame du capteur} & \textbf{B : trame reçue par la gateway} \\ \hline
+Octets & \texttt{3d 00 00 01 02 03 04 05 06 07 08 09} & \texttt{00 00 00 00 00 01 45 00 00 00 8f 2e 08 fe ff 58 17 a8 b2 1f 65 0f 78 d2} \\ \hline
+Longueur & 12 octets & 24 octets \\ \hline
+\texttt{header} & \texttt{3d} : version 0, type 15 (RAW\_CUSTOM), route 1 (FLOOD) & \texttt{00} : version 0, type 0 (REQ), route 0 (TRANSPORT\_FLOOD) \\ \hline
+Codes de transport & absents (route 1) & \texttt{00 00 00 00} \\ \hline
+\texttt{path\_length} & \texttt{00} : 0 saut & \texttt{01} : 1 saut \\ \hline
+\texttt{path} & vide & \texttt{45} (hash du repeater) \\ \hline
+\texttt{payload} & 10 octets : \texttt{00 01 02 \ldots{} 09} & 17 octets : \texttt{00 00 00 8f \ldots{} 78 d2} \\ \hline
+Émetteur & le capteur & le repeater \\ \hline
+Contenu & données de test, en clair & Join-Request LoRaWAN d'un autre appareil (DevEUI \texttt{a81758fffe082e8f}) \\ \hline
+Reçue par la gateway & directement : $-92$~dBm, SNR $+13{,}25$~dB & via le repeater : $-91$~dBm, SNR $+13{,}75$~dB \\ \hline
+\end{tabular}
+\end{center}
+
+\section*{Ce qu'elles ont en commun}
+
+Presque rien. La plus longue suite d'octets identique est \texttt{00 00 01} (3 octets), par hasard.
+Le payload \texttt{00 01 \ldots{} 09} de A n'apparaît pas dans B.
+Les deux sont des trames MeshCore valides, entendues par le même repeater sur le même canal.
+
+\section*{Ce que le repeater en fait}
+
+\begin{itemize}
+  \item \textbf{A} : reçue (type 15, $-34$~dBm, 0 saut), puis abandonnée. \texttt{Mesh.cpp} ne relaie pas les paquets RAW\_CUSTOM en flood.
+  \item \textbf{B} : la Join-Request reçue (type 0, $-106$~dBm) est retransmise après ajout de \texttt{45} au chemin.
+\end{itemize}
+
+Un vrai relais de A aurait été \texttt{3d 01 45 00 01 02 03 04 05 06 07 08 09} (13 octets).
+B n'a ni cet en-tête ni ce payload : les deux trames viennent de deux sources différentes.
+
+\end{document}

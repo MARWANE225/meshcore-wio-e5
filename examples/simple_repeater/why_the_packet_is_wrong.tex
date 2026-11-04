@@ -1,0 +1,60 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[french]{babel}
+\usepackage[margin=2cm]{geometry}
+
+\title{Cohérence entre une Join-Request LoRaWAN et le format de paquet MeshCore}
+\date{9 octobre 2026}
+
+\begin{document}
+\maketitle
+
+\section*{Trame étudiée}
+
+Trame reçue par la gateway (24 octets, base64 \texttt{AAAAAAABRQAAAI8uCP7/WBeosh9lD3jS}) :
+
+\begin{center}
+\texttt{00 00 00 00 00 01 45 00 00 00 8f 2e 08 fe ff 58 17 a8 b2 1f 65 0f 78 d2}
+\end{center}
+
+\section*{1. Lecture MeshCore (\texttt{packet\_format.md})}
+
+Format : \texttt{[header][transport\_codes][path\_length][path][payload]}.
+
+\begin{center}
+\begin{tabular}{|l|p{5.2cm}|l|p{4cm}|}
+\hline
+Octets & Hex & Champ & Valeur \\ \hline
+0     & \texttt{00} & header & version 0, type 0 (REQ), route 0 (flood + codes de transport) \\ \hline
+1--4  & \texttt{00 00 00 00} & transport\_codes & deux codes à 0 \\ \hline
+5     & \texttt{01} & path\_length & 1 hash de 1 octet \\ \hline
+6     & \texttt{45} & path & hash du repeater \\ \hline
+7--23 & \texttt{00 00 00 8f 2e 08 fe ff 58 17 a8 b2 1f 65 0f 78 d2} & payload & 17 octets \\ \hline
+\end{tabular}
+\end{center}
+
+\section*{2. Lecture LoRaWAN (trame d'origine, 23 octets)}
+
+Sans l'octet de chemin ajouté par le repeater, la trame est une Join-Request :
+MHDR (1) + JoinEUI (8) + DevEUI (8) + DevNonce (2) + MIC (4) = 23 octets, en little-endian.
+
+\begin{center}
+\begin{tabular}{|l|l|l|l|}
+\hline
+Octets & Hex & Champ & Valeur \\ \hline
+0     & \texttt{00} & MHDR & Join-Request \\ \hline
+1--8  & \texttt{00 00 00 00 00 00 00 00} & JoinEUI & \texttt{0000000000000000} \\ \hline
+9--16 & \texttt{8f 2e 08 fe ff 58 17 a8} & DevEUI & \texttt{a81758fffe082e8f} \\ \hline
+17--18 & \texttt{b2 1f} & DevNonce & \texttt{0x1fb2} \\ \hline
+19--22 & \texttt{65 0f 78 d2} & MIC & \texttt{650f78d2} \\ \hline
+\end{tabular}
+\end{center}
+
+\section*{3. Passage de l'un à l'autre}
+
+Le repeater ne modifie que deux champs : \texttt{path\_length} passe de \texttt{00} à \texttt{01}
+et son hash \texttt{45} est ajouté au chemin. L'en-tête, les codes de transport et le payload restent identiques,
+donc la trame passe de $23$ à $23 + 1 = 24$ octets.
+
+\end{document}

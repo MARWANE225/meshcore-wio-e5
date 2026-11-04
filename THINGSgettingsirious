@@ -1,0 +1,289 @@
+Lorsqu'un nœud inconnu envoie une requête, elle passe par '''onAnonDataRecv'''. S'il s'agit d'une tentative de connexion (fourniture d'un mot de passe),
+
+
+la fonction handleLoginReq vérifie les droits (Admin, Guest) et ajoute le client à la liste de contrôle d'accès (ACL). Parallèlement, onAdvertRecv capte les annonces pour construire et mettre à jour la liste des voisins directs.
+
+
+Une fois qu'un nœud est authentifié, ses paquets passent par onPeerDataRecv. C'est ici que sont traités les demandes de télémétrie, les échanges de statistiques réseau, ou encore les commandes CLI distantes.
+
+
+Pour les envois larges (inondation / flood), des fonctions comme allowPacketForward vérifient si le paquet n'a pas atteint le nombre maximum de sauts ou s'il n'a pas déjà transité par ce nœud pour éviter de saturer la bande passante.
+
+Dans la méthode sendNodeDiscoverReq(), tu définis un masque de bits pour cibler le type d'équipement. Actuellement, il est restreint à ADV_TYPE_REPEATER.
+
+Change cette ligne :
+
+C++
+  data[1] = (1 << ADV_TYPE_REPEATER);
+Par celle-ci, pour inclure les capteurs (grâce à l'opérateur bitwise |) :
+
+C++
+  data[1] = (1 << ADV_TYPE_REPEATER) | (1 << ADV_TYPE_SENSOR);
+2. Modifier le filtre de la réponse (Réception)
+Quand ton capteur entendra cette requête, il va obéir et répondre avec un paquet CTL_TYPE_NODE_DISCOVER_RESP. Mais le répéteur a une sécurité à la réception dans onControlDataRecv qui rejette tout ce qui n'est pas un répéteur.
+
+Localise ce bloc dans onControlDataRecv :
+
+C++
+  } else if (type == CTL_TYPE_NODE_DISCOVER_RESP && packet->payload_len >= 6) {
+    uint8_t node_type = packet->payload[0] & 0x0F;
+    if (node_type != ADV_TYPE_REPEATER) {
+      return; // <--- C'est ici que la réponse du capteur est ignorée et jetée
+    }
+Modifie la condition pour accepter les deux rôles :
+
+C++
+  } else if (type == CTL_TYPE_NODE_DISCOVER_RESP && packet->payload_len >= 6) {
+    uint8_t node_type = packet->payload[0] & 0x0F;
+    if (node_type != ADV_TYPE_REPEATER && node_type != ADV_TYPE_SENSOR) {
+      return; 
+    }
+    ===================================================================================================
+    marwane@fedora:~/MeshCore$ tio                   /dev/ttyUSB0 -b 115200
+[17:09:28.890] tio 3.9
+[17:09:28.890] Press ctrl-t q to quit
+[17:09:28.892] Connected to /dev/ttyUSB0
+Repeater ID: 155C449966426D720441DC9692D17C9952BECD49132A7E2F69F3A3946192B438
+
+[AUTO-DISCOVERY] Voisins actuels : -none-
+
+<<< [REPEATER] Paquet relayé (TX) ! Type: 4 <<<
+1111111111111111111111111111111111111111111111111111111111111
+                                                             [AUTO-DISCOVERY] Voisins actuels : -none-
+         111111111111111111111111111111111111111111
+>>> [REPEATER] Paquet intercepté ! Type: 2 | RSSI: -24 | Hops: 0 <<<
+
+[AUTO-DISCOVERY] Voisins actuels : -none-
+
+                                         [AUTO-DISCOVERY] Voisins actuels : -none-
+
+>>> [REPEATER] Paquet intercepté ! Type: 2 | RSSI: -24 | Hops: 0 <<<
+
+>>> [REPEATER] Paquet intercepté ! Type: 4 | RSSI: -22 | Hops: 0 <<<
+
+[AUTO-DISCOVERY] Voisins actuels : A280FF42:12:50
+
+<<< [REPEATER] Paquet relayé (TX) ! Type: 4 <<<
+
+[AUTO-DISCOVERY] Voisins actuels : A280FF42:42:50
+
+>>> [REPEATER] Paquet intercepté ! Type: 2 | RSSI: -24 | Hops: 0 <<<
+
+[AUTO-DISCOVERY] Voisins actuels : A280FF42:72:50
+
+                                                 [AUTO-DISCOVERY] Voisins actuels : A280FF42:102:50
+
+>>> [REPEATER] Paquet intercepté ! Type: 2 | RSSI: -24 | Hops: 0 <<<
+
+>>> [REPEATER] Paquet intercepté ! Type: 4 | RSSI: -24 | Hops: 0 <<<
+
+[AUTO-DISCOVERY] Voisins actuels : A280FF42:12:49
+
+<<< [REPEATER] Paquet relayé (TX) ! Type: 4 <<<
+
+[AUTO-DISCOVERY] Voisins actuels : A280FF42:42:49
+
+>>> [REPEATER] Paquet intercepté ! Type: 2 | RSSI: -25 | Hops: 0 <<<
+
+[AUTO-DISCOVERY] Voisins actuels : A280FF42:72:49
+
+                                                 [AUTO-DISCOVERY] Voisins actuels : A280FF42:102:49
+
+>>> [REPEATER] Paquet intercepté ! Type: 2 | RSSI: -25 | Hops: 0 <<<
+
+>>> [REPEATER] Paquet intercepté ! Type: 4 | RSSI: -25 | Hops: 0 <<<
+
+[AUTO-DISCOVERY] Voisins actuels : A280FF42:12:50
+
+<<< [REPEATER] Paquet relayé (TX) ! Type: 4 <<<
+
+[AUTO-DISCOVERY] Voisins actuels : A280FF42:42:50
+
+>>> [REPEATER] Paquet intercepté ! Type: 2 | RSSI: -25 | Hops: 0 <<<
+
+[AUTO-DISCOVERY] Voisins actuels : A280FF42:72:50
+
+                                                 [AUTO-DISCOVERY] Voisins actuels : A280FF42:102:50
+
+>>> [REPEATER] Paquet intercepté ! Type: 2 | RSSI: -25 | Hops: 0 <<<
+
+>>> [REPEATER] Paquet intercepté ! Type: 4 | RSSI: -25 | Hops: 0 <<<
+
+[AUTO-DISCOVERY] Voisins actuels : A280FF42:12:48
+
+<<< [REPEATER] Paquet relayé (TX) ! Type: 4 <<<
+
+
+
+=======================================================================================
+marwane@fedora:~$ tio /dev/ttyUSB1 -b 115200
+[16:50:24.212] tio 3.9
+[16:50:24.212] Press ctrl-t q to quit
+[16:50:24.213] Connected to /dev/ttyUSB1
+0
+0
+17157708311	JMF alert create	1
+JMF sendAlert
+JMF createSelfAdvert
+0
+0
+17157708911	JMF alert create	1
+JMF sendAlert
+	0
+0
+17157709511	JMF alert create	1
+JMF sendAlert
+JMF createSelfAdvert
+1111110
+0
+17157710111	JMF alert create	1
+JMF sendAlert
+0
+0
+17157710711	JMF alert create	1
+JMF sendAlert
+JMF createSelfAdvert
+0
+0
+17157711311	JMF alert create	1
+JMF sendAlert
+0
+0
+17157711911	JMF alert create	1
+JMF sendAlert
+JMF createSelfAdvert
+0
+0
+17157712511	JMF alert create	1
+JMF sendAlert
+0
+0
+17157713111	JMF alert create	1
+JMF sendAlert
+JMF createSelfAdvert
+0
+0
+17157713711	JMF alert create	1
+JMF sendAlert
+0
+0
+17157714311	JMF alert create	1
+JMF sendAlert
+JMF createSelfAdvert
+0
+0
+17157714911	JMF alert create	1
+JMF sendAlert
+0
+0
+17157715511	JMF alert create	1
+JMF sendAlert
+JMF createSelfAdvert
+0
+0
+17157716111	JMF alert create	1
+JMF sendAlert
+0
+0
+17157716711	JMF alert create	1
+JMF sendAlert
+JMF createSelfAdvert
+0
+0
+17157717311	JMF alert create	1
+JMF sendAlert
+0
+0
+17157717911	JMF alert create	1
+JMF sendAlert
+JMF createSelfAdvert
+0
+0
+17157718511	JMF alert create	1
+JMF sendAlert
+0
+0
+17157719111	JMF alert create	1
+JMF sendAlert
+JMF createSelfAdvert
+0
+0
+17157719711	JMF alert create	1
+JMF sendAlert
+0
+0
+17157720311	JMF alert create	1
+JMF sendAlert
+JMF createSelfAdvert
+111111111111111111111111111111111111111111111111111111111111111111111111111111110
+0
+17157720911	JMF alert create	1
+JMF sendAlert
+0
+0
+17157721511	JMF alert create	1
+JMF sendAlert
+JMF createSelfAdvert
+0
+0
+17157722111	JMF alert create	1
+JMF sendAlert
+0
+0
+17157722711	JMF alert create	1
+JMF sendAlert
+JMF createSelfAdvert
+0
+0
+17157723311	JMF alert create	1
+JMF sendAlert
+0
+0
+17157723911	JMF alert create	1
+JMF sendAlert
+JMF createSelfAdvert
+0
+0
+17157724511	JMF alert create	1
+JMF sendAlert
+0
+0
+17157725111	JMF alert create	1
+JMF sendAlert
+JMF createSelfAdvert
+0
+0
+17157725711	JMF alert create	1
+JMF sendAlert
+=====================================================================================
+la question : est ce que le relay peut identifier si le message et pour lui et puis il le forward 
+C'est par ce que le sensor envoie un message d'rrosage il crie "A tous ceux qui m'entendent, faites passer ce message !"(sendFloofd)
+dans cette cas le répeteur il est pas ciblé mais en tous cas il faut qu'il doit agit et faire quelque chose face au message de sensor.
+Aprés l'interception de packet par le repeteur, 
+
+
+Un répéteur LoRa doit écouter 100 % du temps. La radio ne dort jamais. Cela signifie que ton répéteur ne peut pas tourner sur une petite batterie de 2000 mAh sans panneau solaire. Pour une efficacité maximale, tes répéteurs devront être les nœuds les mieux alimentés de ton réseau.
+
+=========================================================================================
+77 = w
+
+69 = i
+
+6F = o
+
+2D = -
+
+65 35 = e5
+
+2D = -
+
+6D 69 6E 69 = mini
+
+20 = [espace]
+
+53 65 6E 73 6F 72 = Sensor
+
+33 = 3
+
+===========================================================================
+

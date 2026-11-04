@@ -1,0 +1,89 @@
+diff --git a/examples/simple_repeater/MyMesh.cpp b/examples/simple_repeater/MyMesh.cpp
+index 09690749..b12a433a 100644
+--- a/examples/simple_repeater/MyMesh.cpp
++++ b/examples/simple_repeater/MyMesh.cpp
+@@ -478,7 +478,12 @@ void MyMesh::logRx(mesh::Packet *pkt, int len, float score) {
+     bridge.sendPacket(pkt);
+   }
+ #endif
+-
++// --- Marwane Ajout ---
++       Serial.printf("\r\n>>> [REPEATER] Paquet intercepté ! Type: %d | RSSI: %d | Hops: %d <<<\r\n", 
++                pkt->getPayloadType(), 
++                (int)_radio->getLastRSSI(), 
++                pkt->getPathHashCount());
++//------------------------------------------
+   if (_logging) {
+     File f = openAppend(PACKET_LOG_FILE);
+     if (f) {
+@@ -499,6 +504,10 @@ void MyMesh::logRx(mesh::Packet *pkt, int len, float score) {
+ }
+ 
+ void MyMesh::logTx(mesh::Packet *pkt, int len) {
++// --- Marwane Ajout ---
++  Serial.printf("\r\n<<< [REPEATER] Paquet relayé (TX) ! Type: %d <<<\r\n", pkt->getPayloadType());
++// ------------------------------
++
+ #ifdef WITH_BRIDGE
+   if (_prefs.bridge_pkt_src == 0) {
+     bridge.sendPacket(pkt);
+@@ -638,10 +647,11 @@ void MyMesh::onAdvertRecv(mesh::Packet *packet, const mesh::Identity &id, uint32
+                           const uint8_t *app_data, size_t app_data_len) {
+   mesh::Mesh::onAdvertRecv(packet, id, timestamp, app_data, app_data_len); // chain to super impl
+ 
+-  // if this a zero hop advert (and not via 'Share'), add it to neighbours
++  // if this a zero hop advert (and not via 'Share'), add it to neighbours ------Marwane---
+   if (packet->getPathHashCount() == 0 && !isShare(packet)) {
+     AdvertDataParser parser(app_data, app_data_len);
+-    if (parser.isValid() && parser.getType() == ADV_TYPE_REPEATER) { // just keep neigbouring Repeaters
++    // --- MARWANE AJOUT : On accepte les Repeaters ET les Sensors JE CROIS QUE LE REPEATER EST UN PEU RACISTE ET RETOURNE QUE LES AUTRES REPEATER---
++    if (parser.isValid() && (parser.getType() == ADV_TYPE_REPEATER || parser.getType() == ADV_TYPE_SENSOR)) { 
+       putNeighbour(id, timestamp, packet->getSNR());
+     }
+   }
+@@ -803,7 +813,8 @@ void MyMesh::onControlDataRecv(mesh::Packet* packet) {
+     }
+   } else if (type == CTL_TYPE_NODE_DISCOVER_RESP && packet->payload_len >= 6) {
+     uint8_t node_type = packet->payload[0] & 0x0F;
+-    if (node_type != ADV_TYPE_REPEATER) {
++    //Marwane
++    if (node_type != ADV_TYPE_REPEATER && node_type != ADV_TYPE_SENSOR) {
+       return;
+     }
+     if (packet->payload_len < 6 + PUB_KEY_SIZE) {
+@@ -832,7 +843,9 @@ void MyMesh::onControlDataRecv(mesh::Packet* packet) {
+ void MyMesh::sendNodeDiscoverReq() {
+   uint8_t data[10];
+   data[0] = CTL_TYPE_NODE_DISCOVER_REQ; // prefix_only=0
+-  data[1] = (1 << ADV_TYPE_REPEATER);
++  //--------MARWANE---------
++  data[1] = (1 << ADV_TYPE_REPEATER) | (1 << ADV_TYPE_SENSOR);
++  //------------------------
+   getRNG()->random(&data[2], 4); // tag
+   memcpy(&pending_discover_tag, &data[2], 4);
+   pending_discover_until = futureMillis(60000);
+@@ -1263,6 +1276,23 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply
+ }
+ 
+ void MyMesh::loop() {
++// --- AJOUT : AFFICHAGE AUTOMATIQUE DES VOISINS Marwane a été ici---
++  static unsigned long next_auto_dump = 0;
++  if (next_auto_dump == 0 || millisHasNowPassed(next_auto_dump)) {
++    char reply[512] = {0};
++    formatNeighborsReply(reply);
++    
++    // On n'affiche que s'il y a au moins un voisin trouvé
++    if (strlen(reply) > 0) {
++      Serial.printf("\n[AUTO-DISCOVERY] Voisins actuels : %s\n", reply);
++    } else {
++      Serial.println("\n[AUTO-DISCOVERY] Aucun voisin détecté pour le moment...");
++    }
++    
++    // Programme le prochain affichage dans 30 secondes (30000 ms)
++    next_auto_dump = futureMillis(30000); 
++  }
++  // -------------------------------------------------
+ #ifdef WITH_BRIDGE
+   bridge.loop();
+ #endif
+

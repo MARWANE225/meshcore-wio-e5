@@ -33,45 +33,31 @@ void setup() {
   }
 #endif
 
-  if (!radio_init()) { halt(); }
+// --- VERSION SIMPLIFIÉE (SANS FICHIERS) ---
+  Serial.println("Initialisation du Room Server (Sans mémoire Flash)");
 
-  fast_rng.begin(radio_driver.getRngSeed());
-
-  FILESYSTEM* fs;
-#if defined(NRF52_PLATFORM)
-  InternalFS.begin();
-  fs = &InternalFS;
-  IdentityStore store(InternalFS, "");
-#elif defined(RP2040_PLATFORM)
-  LittleFS.begin();
-  fs = &LittleFS;
-  IdentityStore store(LittleFS, "/identity");
-  store.begin();
-#elif defined(ESP32)
-  SPIFFS.begin(true);
-  fs = &SPIFFS;
-  IdentityStore store(SPIFFS, "/identity");
-#else
-  #error "need to define filesystem"
-#endif
-  if (!store.load("_main", the_mesh.self_id)) {
-    the_mesh.self_id = radio_new_identity();   // create new random identity
-    int count = 0;
-    while (count < 10 && (the_mesh.self_id.pub_key[0] == 0x00 || the_mesh.self_id.pub_key[0] == 0xFF)) {  // reserved id hashes
-      the_mesh.self_id = radio_new_identity(); count++;
-    }
-    store.save("_main", the_mesh.self_id);
+  // On génère une identité aléatoire en RAM, elle sera perdue au redémarrage
+  the_mesh.self_id = radio_new_identity();
+  int count = 0;
+  while (count < 10 && (the_mesh.self_id.pub_key[0] == 0x00 || the_mesh.self_id.pub_key[0] == 0xFF)) {
+    the_mesh.self_id = radio_new_identity(); 
+    count++;
   }
 
-  Serial.print("Room ID: ");
-  mesh::Utils::printHex(Serial, the_mesh.self_id.pub_key, PUB_KEY_SIZE); Serial.println();
+  Serial.print("Room ID (Temporaire): ");
+  mesh::Utils::printHex(Serial, the_mesh.self_id.pub_key, PUB_KEY_SIZE); 
+  Serial.println();
 
   command[0] = 0;
-
   sensors.begin();
 
-  the_mesh.begin(fs);
-
+  // On passe NULL car on n'a pas de système de fichiers
+  the_mesh.begin(NULL); 
+  // ------------------------------------------
+  
+  
+  
+  
 #ifdef DISPLAY_CLASS
   ui_task.begin(the_mesh.getNodePrefs(), FIRMWARE_BUILD_DATE, FIRMWARE_VERSION);
 #endif
