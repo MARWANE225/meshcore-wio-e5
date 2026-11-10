@@ -299,9 +299,20 @@ DispatcherAction Mesh::onRecvPacket(Packet* pkt) {
     } 
     //Mondher
     case PAYLOAD_TYPE_CONTROL: {
-      if (pkt->isRouteFlood()) {
-        action = routeRecvPacket(pkt);
+      // ===== TTL (Time To Live): the professor's idea =====
+      // Maximum number of repeaters a control packet may pass through.
+      // The hop count is the "path count" byte in the frame (2D 0X ...).
+      // A frame with path count 3 is received but never relayed again.
+      const uint8_t CONTROL_MAX_HOPS = 3;
+
+      if (pkt->isRouteFlood()                             // only flood-routed packets are relayed
+          && pkt->getPathHashCount() < CONTROL_MAX_HOPS   // TTL check: too many hops -> drop it
+          && !_tables->wasSeen(pkt)) {                    // DUPLICATE check: already relayed -> drop it
+
+        _tables->markSeen(pkt);                // remember this packet (type + payload fingerprint)
+        action = routeRecvPacket(pkt);         // relay it: the repeater adds its ID to the path and retransmits
       }
+      // if any of the three conditions fails, nothing is done and the packet is dropped
       break;
     }
     case PAYLOAD_TYPE_MULTIPART:

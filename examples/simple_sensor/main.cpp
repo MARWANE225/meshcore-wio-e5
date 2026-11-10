@@ -198,6 +198,8 @@ void loop() {
 //    uint8_t companion_path[] = {0xd9};
 //    uint8_t companion_path_len = 1;
     uint8_t raw_data[10]={0,1,2,3,4,5,6,7,8,9};
+    static uint8_t counter = 0;
+    raw_data[9] = counter++;   // payload changes every send
     // mesh::Packet* packet = the_mesh.createRawData(raw_data, 10);
 
 /// JMF
